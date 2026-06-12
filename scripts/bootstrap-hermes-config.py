@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""Bootstrap Hermes config.yaml with Pinto platform defaults for Docker.
+"""Bootstrap Hermes config.yaml with Pinto platform for Docker.
 
-Creates or updates:
-  - config.yaml with pinto platform enabled + api_server
-  - .env with API_SERVER_KEY if missing
+Auto-configures:
+  - plugins.enabled: platforms/pinto
+  - platforms.pinto: enabled
+  - platforms.api_server: enabled (webhook receiver)
+  - platform_toolsets.pinto: default toolset list
+  - .env: API_SERVER_KEY if missing
+
+User only needs to set PINTO_BOT_ID in .env.
 """
 
 import os
@@ -21,14 +26,24 @@ HERMES_HOME = os.environ.get("HERMES_HOME", os.path.expanduser("~/.hermes"))
 CONFIG_PATH = Path(HERMES_HOME) / "config.yaml"
 ENV_PATH = Path(HERMES_HOME) / ".env"
 
-
-def default_pinto_extra() -> dict:
-    return {
-        "apiUrl": os.environ.get("PINTO_API_URL", "https://api.pinto-app.com"),
-        "botId": os.environ.get("PINTO_BOT_ID", ""),
-        "webhookSecret": os.environ.get("PINTO_WEBHOOK_SECRET", f"pinto-{secrets.token_hex(12)}"),
-        "webhookPath": os.environ.get("PINTO_WEBHOOK_PATH", "/plugins/pinto/webhook"),
-    }
+PINTO_TOOLSETS = [
+    "browser",
+    "clarify",
+    "code_execution",
+    "cronjob",
+    "delegation",
+    "file",
+    "image_gen",
+    "memory",
+    "messaging",
+    "session_search",
+    "skills",
+    "terminal",
+    "todo",
+    "tts",
+    "vision",
+    "web",
+]
 
 
 def ensure_api_server_key() -> str:
@@ -49,6 +64,30 @@ def ensure_api_server_key() -> str:
     return key
 
 
+def ensure_pinto_bot_id() -> None:
+    """Prompt user for PINTO_BOT_ID if not set."""
+    bot_id = os.environ.get("PINTO_BOT_ID", "").strip()
+    if bot_id:
+        return
+
+    # Check .env
+    if ENV_PATH.exists():
+        for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
+            if line.startswith("PINTO_BOT_ID="):
+                bot_id = line.split("=", 1)[1].strip()
+                if bot_id:
+                    os.environ["PINTO_BOT_ID"] = bot_id
+                    return
+
+    print()
+    print("=" * 50)
+    print("  PINTO_BOT_ID not set!")
+    print("  Please set it in .env:")
+    print(f"    PINTO_BOT_ID=your_bot_id")
+    print("=" * 50)
+    print()
+
+
 def main():
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -67,35 +106,68 @@ def main():
 
     changed = False
 
-    # Ensure platforms section
+    # ── plugins.enabled ──
+    plugins = config.get("plugins", {})
+    if not isinstance(plugins, dict):
+        plugins = {}
+    enabled = plugins.get("enabled", [])
+    if not isinstance(enabled, list):
+        enabled = []
+    if "platforms/pinto" not in enabled:
+        enabled.append("platforms/pinto")
+        plugins["enabled"] = enabled
+        config["plugins"] = plugins
+        changed = True
+        print("Added 'platforms/pinto' to plugins.enabled")
+
+    # ── platforms section ──
     if "platforms" not in config or not isinstance(config["platforms"], dict):
         config["platforms"] = {}
         changed = True
 
-    # Enable api_server (needed for webhook receiving)
-    if "api_server" not in config["platforms"]:
-        config["platforms"]["api_server"] = {"enabled": True}
+    # Enable api_server
+    api_server = config["platforms"].get("api_server", {})
+    if not isinstance(api_server, dict):
+        api_server = {}
+    if not api_server.get("enabled"):
+        api_server["enabled"] = True
+        config["platforms"]["api_server"] = api_server
         changed = True
-    elif not config["platforms"]["api_server"].get("enabled"):
-        config["platforms"]["api_server"]["enabled"] = True
+        print("Enabled platforms.api_server")
+
+    # Enable pinto
+    if "pinto" not in config["platforms"]:
+        config["platforms"]["pinto"] = {"enabled": True}
+        changed = True
+        print("Enabled platforms.pinto")
+    elif not config["platforms"].get("pinto", {}).get("enabled"):
+        config["platforms"]["pinto"] = {"enabled": True}
         changed = True
 
-    # Enable pinto platform
-    if "pinto" not in config["platforms"]:
-        config["platforms"]["pinto"] = {
-            "enabled": True,
-            "extra": default_pinto_extra(),
-        }
+    # ── platform_toolsets.pinto ──
+    toolsets = config.get("platform_toolsets", {})
+    if not isinstance(toolsets, dict):
+        toolsets = {}
+    if "pinto" not in toolsets:
+        toolsets["pinto"] = PINTO_TOOLSETS
+        config["platform_toolsets"] = toolsets
         changed = True
-        print(f"Initialized platforms.pinto in {CONFIG_PATH}")
+        print(f"Added platform_toolsets.pinto ({len(PINTO_TOOLSETS)} toolsets)")
 
     if changed:
-        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        CONFIG_PATH.write_text(yaml.dump(config, default_flow_style=False, allow_unicode=True), encoding="utf-8")
-        print(f"Updated Hermes config in {CONFIG_PATH}")
+        CONFIG_PATH.write_text(
+            yaml.dump(config, default_flow_style=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+        print(f"Updated Hermes config: {CONFIG_PATH}")
 
-    # Generate API_SERVER_KEY if missing
+    # ── Generate API_SERVER_KEY ──
     ensure_api_server_key()
+
+    # ── Check PINTO_BOT_ID ──
+    ensure_pinto_bot_id()
+
+    print("Bootstrap complete!")
 
 
 if __name__ == "__main__":
