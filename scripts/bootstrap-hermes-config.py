@@ -131,11 +131,25 @@ def main():
         api_server = {}
     if not api_server.get("enabled"):
         api_server["enabled"] = True
-        config["platforms"]["api_server"] = api_server
         changed = True
         print("Enabled platforms.api_server")
+    if "extra" not in api_server or not isinstance(api_server.get("extra"), dict):
+        api_server["extra"] = {}
+    api_host = os.environ.get("API_SERVER_HOST", "0.0.0.0").strip() or "0.0.0.0"
+    if api_server["extra"].get("host") != api_host:
+        api_server["extra"]["host"] = api_host
+        changed = True
+        print(f"Set platforms.api_server.extra.host={api_host}")
+    config["platforms"]["api_server"] = api_server
 
-    # Enable pinto
+    # Enable pinto with botId
+    bot_id = os.environ.get("PINTO_BOT_ID", "").strip()
+    if not bot_id and ENV_PATH.exists():
+        for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
+            if line.startswith("PINTO_BOT_ID="):
+                bot_id = line.split("=", 1)[1].strip()
+                break
+
     if "pinto" not in config["platforms"]:
         config["platforms"]["pinto"] = {"enabled": True}
         changed = True
@@ -143,6 +157,18 @@ def main():
     elif not config["platforms"].get("pinto", {}).get("enabled"):
         config["platforms"]["pinto"] = {"enabled": True}
         changed = True
+
+    # Set botId in platforms.pinto.extra
+    pinto_config = config["platforms"]["pinto"]
+    if not isinstance(pinto_config, dict):
+        pinto_config = {}
+        config["platforms"]["pinto"] = pinto_config
+    if "extra" not in pinto_config:
+        pinto_config["extra"] = {}
+    if bot_id and pinto_config["extra"].get("botId") != bot_id:
+        pinto_config["extra"]["botId"] = bot_id
+        changed = True
+        print(f"Set platforms.pinto.extra.botId")
 
     # ── platform_toolsets.pinto ──
     toolsets = config.get("platform_toolsets", {})

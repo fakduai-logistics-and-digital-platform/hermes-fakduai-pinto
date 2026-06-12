@@ -1,0 +1,143 @@
+# llm.txt — Hermes + Pinto project guide for AI agents
+
+This repo runs Hermes Agent as a Pinto chatbot.
+
+Primary goal:
+- Start Hermes Gateway.
+- Expose Pinto webhook at `/plugins/pinto/webhook`.
+- Configure AI provider so Hermes can answer messages.
+- Let users chat with Hermes through Pinto.
+
+Supported runtimes:
+- Podman on macOS/Linux.
+- Docker on macOS/Linux.
+- Docker Desktop on Windows via PowerShell.
+
+Important files:
+- `README.md`: user-facing setup guide from zero to running.
+- `.env.example`: environment template.
+- `.env`: local secrets/config, do not commit.
+- `Dockerfile`: Docker image.
+- `Dockerfile.podman`: Podman image.
+- `docker-compose.docker.yml`: Docker compose with gateway + dashboard + cli.
+- `docker-compose.podman.yml`: Podman compose with gateway + dashboard + cli.
+- `docker-compose.trycloudflare.yml`: Cloudflare Quick Tunnel overlay.
+- `docker-compose.cloudflare.yml`: Cloudflare named tunnel overlay.
+- `scripts/bootstrap-hermes-config.py`: writes Hermes config under `hermes-config/`.
+- `scripts/patch-api-server-for-pinto-podman.py`: Hermes API server compatibility patch.
+- `scripts/patch-pinto-for-podman.py`: Pinto adapter compatibility patch.
+
+Podman commands:
+```bash
+scripts/podman-start.sh
+scripts/podman-status.sh
+scripts/podman-stop.sh
+scripts/podman-tunnel-start.sh
+scripts/podman-tunnel-status.sh
+scripts/podman-tunnel-stop.sh
+```
+
+Docker macOS/Linux commands:
+```bash
+docker compose -f docker-compose.docker.yml up -d --build
+docker compose -f docker-compose.docker.yml ps
+docker compose -f docker-compose.docker.yml down
+
+docker compose -f docker-compose.docker.yml -f docker-compose.trycloudflare.yml up -d --build
+docker compose -f docker-compose.docker.yml -f docker-compose.trycloudflare.yml logs -f cloudflared
+docker compose -f docker-compose.docker.yml -f docker-compose.trycloudflare.yml down
+```
+
+Windows Docker Desktop commands:
+```powershell
+.\scripts\docker-start.ps1
+.\scripts\docker-status.ps1
+.\scripts\docker-stop.ps1
+.\scripts\docker-tunnel-start.ps1
+.\scripts\docker-tunnel-status.ps1
+.\scripts\docker-tunnel-stop.ps1
+```
+
+Key URLs:
+- Local Gateway health: `http://127.0.0.1:8642/health`
+- Local Pinto webhook: `http://127.0.0.1:8642/plugins/pinto/webhook`
+- Hermes Dashboard: `http://127.0.0.1:9119/`
+- Public Pinto webhook: `https://<cloudflare-host>/plugins/pinto/webhook`
+
+Required `.env` values:
+```env
+PINTO_BOT_ID=your_pinto_bot_id
+API_SERVER_KEY=generated_hex_key
+API_SERVER_HOST=0.0.0.0
+PINTO_ALLOW_ALL_USERS=true
+GATEWAY_ALLOW_ALL_USERS=true
+HERMES_DASHBOARD=1
+HERMES_DASHBOARD_PORT=9119
+```
+
+AI provider config:
+```env
+OPENAI_API_KEY=your_api_key
+OPENAI_BASE_URL=http://your-ai-server:port/v1
+HERMES_PROVIDER=openai-api
+HERMES_MODEL=your_model
+```
+
+Known working example shape:
+```env
+OPENAI_BASE_URL=http://45.136.254.176:20128/v1
+HERMES_PROVIDER=openai-api
+HERMES_MODEL=codex
+```
+Do not print or commit real API keys.
+
+Cloudflare Quick Tunnel behavior:
+- Quick Tunnel URLs are temporary.
+- Restarting cloudflared or running compose down may change URL.
+- When URL changes, update Pinto Developer Console webhook URL.
+- For stable production URL, use Cloudflare named tunnel and `CLOUDFLARE_TUNNEL_TOKEN`.
+
+Common expected health responses:
+```json
+{"status":"ok","platform":"hermes-agent"}
+```
+
+```json
+{"ok":true,"channel":"pinto"}
+```
+
+If Pinto webhook returns 500:
+- Check gateway logs first.
+- Verify `PINTO_BOT_ID`.
+- Verify API server host is `0.0.0.0`.
+- Verify Pinto adapter compatibility patches are included in image.
+- Verify AI provider config if logs say `No inference provider configured`.
+
+If AI provider test is needed:
+```bash
+hermes -z "reply only: ok" --provider openai-api --model codex
+```
+Expected output:
+```text
+ok
+```
+
+If logs show:
+```text
+Pinto HTTP 500: {"ok":false,"error":"Failed to send message"}
+```
+Hermes received webhook and likely generated reply, but Pinto rejected send-back request. Check real Pinto `chat_id`, bot ID, Pinto API URL, webhook secret, and bot permissions.
+
+Important implementation notes:
+- Hermes Gateway must bind to `0.0.0.0` inside container.
+- Dashboard is separate from Gateway and runs on port `9119`.
+- Gateway root `/` may return 404; use `/health` for health checks.
+- Pinto webhook route is `/plugins/pinto/webhook`.
+- `host.docker.internal:host-gateway` can break Podman on macOS; Podman compose avoids it.
+- The compatibility patches fix Hermes 0.16 route mounting, `response_class`, and Pinto adapter `send()` signature.
+
+When editing:
+- Keep Podman and Docker compose files separate.
+- Keep user-facing instructions simple in `README.md`.
+- Do not commit `.env` or secrets.
+- Prefer adding helper scripts over telling new users long compose commands.

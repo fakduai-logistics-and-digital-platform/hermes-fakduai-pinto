@@ -1,325 +1,807 @@
-# Hermes + Pinto Docker
+# Hermes + Pinto Chatbot
 
-<img width="1448" alt="image" src="https://github.com/user-attachments/assets/4989fc29-cbda-49f3-b32e-c40e38577eef" />
+Run **Hermes Agent** as a chatbot behind **Pinto**, with optional public webhook URL from **Cloudflare Quick Tunnel**.
 
+This repo supports:
 
-This project builds a Hermes Agent Docker image with the Pinto Chat adapter plugin included.
+- macOS / Linux + **Podman**
+- macOS / Linux + **Docker**
+- Windows + **Docker Desktop** + PowerShell
 
-## What Is Included
+You will end with:
 
-- Hermes Agent (Python, installed via pip)
-- Pinto adapter plugin from [pinto-adapter-hermes](https://github.com/fakduai-logistics-and-digital-platform/pinto-adapter-hermes)
-- Cloudflare tunnel support (Quick Tunnel or named tunnel)
-- Webhook and API port: `8642`
-- Config folder: `./hermes-config`
+```text
+Pinto Chatbot  ->  Cloudflare URL  ->  Hermes Gateway  ->  AI Provider
+```
 
-## 1. เตรียม `.env`
+---
+
+## What you need
+
+### Option A: Podman users
+
+Install:
+
+```bash
+podman
+podman-compose
+curl
+python3
+```
+
+Check:
+
+```bash
+podman --version
+podman-compose --version
+```
+
+### Option B: Docker users
+
+Install Docker Desktop or Docker Engine.
+
+Check:
+
+```bash
+docker --version
+docker compose version
+```
+
+### Option C: Windows users
+
+Use **Docker Desktop** and run commands in **PowerShell**.
+
+Check:
+
+```powershell
+docker --version
+docker compose version
+```
+
+No WSL shell required.
+
+---
+
+## Ports
+
+```text
+Hermes Gateway / Pinto webhook: http://127.0.0.1:8642
+Hermes Dashboard:              http://127.0.0.1:9119
+Pinto webhook path:            /plugins/pinto/webhook
+```
+
+Local webhook:
+
+```text
+http://127.0.0.1:8642/plugins/pinto/webhook
+```
+
+Public webhook will look like:
+
+```text
+https://xxxx.trycloudflare.com/plugins/pinto/webhook
+```
+
+---
+
+## Files
+
+```text
+Podman:
+  Dockerfile.podman
+  docker-compose.podman.yml
+  scripts/podman-start.sh
+  scripts/podman-status.sh
+  scripts/podman-stop.sh
+  scripts/podman-tunnel-start.sh
+  scripts/podman-tunnel-status.sh
+  scripts/podman-tunnel-stop.sh
+
+Docker:
+  Dockerfile
+  docker-compose.docker.yml
+  scripts/docker-start.ps1
+  scripts/docker-status.ps1
+  scripts/docker-stop.ps1
+  scripts/docker-tunnel-start.ps1
+  scripts/docker-tunnel-status.ps1
+  scripts/docker-tunnel-stop.ps1
+
+Shared:
+  docker-compose.trycloudflare.yml
+  docker-compose.cloudflare.yml
+  scripts/bootstrap-hermes-config.py
+  scripts/patch-api-server-for-pinto-podman.py
+  scripts/patch-pinto-for-podman.py
+```
+
+---
+
+# Step 1: Clone repo
+
+```bash
+git clone <this-repo-url>
+cd hermes-fakduai-pinto
+```
+
+Windows PowerShell:
+
+```powershell
+git clone <this-repo-url>
+cd hermes-fakduai-pinto
+```
+
+---
+
+# Step 2: Create `.env`
+
+Copy example file:
+
+macOS / Linux:
 
 ```bash
 cp .env.example .env
 ```
 
-แก้ `.env` ตั้ง API Server Key:
+Windows PowerShell:
 
-```bash
-# สร้าง key
-sh scripts/generate-api-key.sh
+```powershell
+Copy-Item .env.example .env
 ```
 
-ใส่ key ใน `.env`:
+Open `.env` in your editor.
 
-```text
-API_SERVER_KEY=your-generated-key
-PINTO_BOT_ID=your-pinto-bot-id
+---
+
+# Step 3: Set Pinto bot ID
+
+In `.env`, set your Pinto bot ID:
+
+```env
+PINTO_BOT_ID=your_pinto_bot_id_here
 ```
 
-หรือรัน setup script อัตโนมัติ:
+Example:
 
-```bash
-sh scripts/configure-domain.sh
+```env
+PINTO_BOT_ID=xjOltYhGtY9nDKp
 ```
 
-## 2. Build Image
+You get this from Pinto Developer Console / bot settings.
 
-**Docker:**
+---
+
+# Step 4: Generate Hermes API server key
+
+Run:
+
+macOS / Linux:
+
 ```bash
-docker compose build
+python3 - <<'PY'
+import secrets
+print(secrets.token_hex(32))
+PY
 ```
 
-**Podman:**
-```bash
-podman-compose build
+Windows PowerShell:
+
+```powershell
+python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-## 3. Start Local Hermes
+Put result in `.env`:
 
-**Docker:**
-```bash
-docker compose up -d
+```env
+API_SERVER_KEY=paste_generated_key_here
 ```
 
-**Podman:**
-```bash
-podman-compose up -d
+---
+
+# Step 5: Configure AI provider
+
+Hermes needs an AI provider to answer messages.
+
+This repo is set up for OpenAI-compatible APIs.
+
+In `.env`:
+
+```env
+OPENAI_API_KEY=your_api_key_here
+OPENAI_BASE_URL=http://your-ai-server:port/v1
+HERMES_PROVIDER=openai-api
+HERMES_MODEL=your_model_name
 ```
 
-ตรวจสอบ:
-```bash
-curl http://127.0.0.1:8642/
-# {"status":"ok","platform":"hermes-agent",...}
+Example:
+
+```env
+OPENAI_API_KEY=sk-your-key
+OPENAI_BASE_URL=http://45.136.254.176:20128/v1
+HERMES_PROVIDER=openai-api
+HERMES_MODEL=codex
 ```
 
-Webhook health:
+Do not commit `.env`. It contains secrets.
+
+---
+
+# Step 6: Start locally
+
+## Podman: macOS / Linux
+
 ```bash
+scripts/podman-start.sh
+```
+
+Check:
+
+```bash
+scripts/podman-status.sh
+```
+
+Stop:
+
+```bash
+scripts/podman-stop.sh
+```
+
+## Docker: macOS / Linux
+
+```bash
+docker compose -f docker-compose.docker.yml up -d --build
+```
+
+Check:
+
+```bash
+docker compose -f docker-compose.docker.yml ps
+curl http://127.0.0.1:8642/health
 curl http://127.0.0.1:8642/plugins/pinto/webhook
-# {"ok":true,"channel":"pinto"}
 ```
 
-## 4. Use Cloudflare Quick Tunnel
-
-Quick Tunnel สำหรับ testing — URL เปลี่ยนทุกครั้งที่ restart
-
-**Docker:**
-```bash
-docker compose -f docker-compose.yml -f docker-compose.trycloudflare.yml up -d
-```
-
-**Podman:**
-```bash
-podman-compose -f docker-compose.yml -f docker-compose.trycloudflare.yml up -d
-```
-
-ดู URL ที่สร้าง:
+Stop:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.trycloudflare.yml logs -f cloudflared
+docker compose -f docker-compose.docker.yml down
 ```
 
-ตัวอย่าง output:
-```text
-https://something-random.trycloudflare.com
+## Docker Desktop: Windows PowerShell
+
+```powershell
+.\scripts\docker-start.ps1
 ```
 
-ใช้:
-```text
-Web UI:   https://something-random.trycloudflare.com/
-Webhook:  https://something-random.trycloudflare.com/plugins/pinto/webhook
+Check:
+
+```powershell
+.\scripts\docker-status.ps1
 ```
 
-⚠️ อย่ารัน `down` ถ้าไม่อยากได้ URL ใหม่
+Stop:
 
-## 5. Use Cloudflare With Your Domain (แนะนำ)
-
-ใน Cloudflare Zero Trust:
-
-1. **Networks > Tunnels** → Create tunnel
-2. เลือก **Cloudflared**
-3. เลือก **Docker**
-4. Copy token หลัง `--token`
-5. เพิ่ม Public Hostname เช่น `hermes.example.com`
-6. Service type: **HTTP**
-7. Service URL:
-
-```text
-hermes-gateway:8642
+```powershell
+.\scripts\docker-stop.ps1
 ```
 
-แก้ `.env`:
+---
 
-```text
-CLOUDFLARE_TUNNEL_TOKEN=your-token
-PINTO_WEBHOOK_URL=https://hermes.example.com/plugins/pinto/webhook
-```
+# Step 7: Verify local services
 
-Start:
-
-**Docker:**
-```bash
-docker compose -f docker-compose.yml -f docker-compose.cloudflare.yml up -d
-```
-
-**Podman:**
-```bash
-podman-compose -f docker-compose.yml -f docker-compose.cloudflare.yml up -d
-```
-
-ใช้:
-```text
-Web UI:   https://hermes.example.com/
-Webhook:  https://hermes.example.com/plugins/pinto/webhook
-```
-
-## 6. Configure Pinto
-
-ตั้งค่า Bot ใน Pinto App:
-
-- `Bot ID`: bot UUID ของคุณ
-- `Webhook URL`: URL จากข้อ 4 หรือ 5 + `/plugins/pinto/webhook`
-- `Webhook Secret`: ตรงกับ `PINTO_WEBHOOK_SECRET` ใน `.env`
-
-ทดสอบ webhook:
+Gateway health:
 
 ```bash
-curl -i https://your-domain.example.com/plugins/pinto/webhook
+curl http://127.0.0.1:8642/health
 ```
 
 Expected:
+
+```json
+{"status":"ok","platform":"hermes-agent"}
+```
+
+Pinto webhook health:
+
+```bash
+curl http://127.0.0.1:8642/plugins/pinto/webhook
+```
+
+Expected:
+
 ```json
 {"ok":true,"channel":"pinto"}
 ```
 
-## Common Commands
+Dashboard:
 
-ดู container ที่รันอยู่:
-```bash
-docker compose ps
+```text
+http://127.0.0.1:9119/
 ```
 
-ดู gateway logs:
-```bash
-docker compose logs -f hermes-gateway
-```
+Open in browser.
 
-ดู Cloudflare logs:
-```bash
-docker compose -f docker-compose.yml -f docker-compose.trycloudflare.yml logs -f cloudflared
-```
+---
 
-รัน Hermes CLI:
-```bash
-docker compose run --rm hermes-cli config
-docker compose run --rm hermes-cli tools list
-docker compose run --rm hermes-cli status
-```
+# Step 8: Get public Cloudflare webhook URL
 
-Shell เข้า container:
-```bash
-docker compose run --rm --entrypoint sh hermes-cli
-```
+Pinto cannot call your local `127.0.0.1` URL.
 
-Restart gateway:
-```bash
-docker compose restart hermes-gateway
-```
+Use Cloudflare Quick Tunnel to get public HTTPS URL.
 
-หยุด:
-```bash
-docker compose down
-```
-
-## Podman Commands
-
-ถ้าใช้ Podman แทน Docker — เปลี่ยน `docker compose` เป็น `podman-compose`:
+## Podman: macOS / Linux
 
 ```bash
-podman-compose build
-podman-compose up -d
-podman-compose logs -f hermes-gateway
-podman-compose down
+scripts/podman-tunnel-start.sh
 ```
 
-หรือใช้ `podman` โดยตรง:
+Output will show:
+
+```text
+Cloudflare URL:
+https://xxxx.trycloudflare.com
+
+Pinto Webhook URL:
+https://xxxx.trycloudflare.com/plugins/pinto/webhook
+```
+
+Copy the **Pinto Webhook URL**.
+
+Check again later:
 
 ```bash
-podman build -t hermes-pinto:local .
-podman run -d --name hermes -p 8642:8642 -v ./hermes-config:/root/.hermes hermes-pinto:local
+scripts/podman-tunnel-status.sh
 ```
 
-## Reset
-
-Reset API key:
-1. แก้ `.env`
-2. เปลี่ยน `API_SERVER_KEY`
-3. Rebuild:
+Stop tunnel:
 
 ```bash
-docker compose build
-docker compose up -d
+scripts/podman-tunnel-stop.sh
 ```
 
-Reset config ทั้งหมด:
+## Docker: macOS / Linux
 
 ```bash
-docker compose down
-rm -rf hermes-config
-docker compose up -d
+docker compose -f docker-compose.docker.yml -f docker-compose.trycloudflare.yml up -d --build
 ```
 
-Full clean rebuild:
+Get URL:
 
 ```bash
-docker compose down
-rm -rf hermes-config
-docker compose build --no-cache
-docker compose up -d
+docker compose -f docker-compose.docker.yml -f docker-compose.trycloudflare.yml logs cloudflared
 ```
 
-## Troubleshooting
+Look for:
 
-### Webhook ไม่ตอบ
+```text
+https://xxxx.trycloudflare.com
+```
 
-ตรวจสอบ:
+Your Pinto webhook URL is:
+
+```text
+https://xxxx.trycloudflare.com/plugins/pinto/webhook
+```
+
+## Docker Desktop: Windows PowerShell
+
+```powershell
+.\scripts\docker-tunnel-start.ps1
+```
+
+Output will show:
+
+```text
+Cloudflare URL:
+https://xxxx.trycloudflare.com
+
+Pinto Webhook URL:
+https://xxxx.trycloudflare.com/plugins/pinto/webhook
+```
+
+Copy the **Pinto Webhook URL**.
+
+Check again later:
+
+```powershell
+.\scripts\docker-tunnel-status.ps1
+```
+
+Stop tunnel:
+
+```powershell
+.\scripts\docker-tunnel-stop.ps1
+```
+
+---
+
+# Step 9: Put webhook URL in Pinto
+
+Open Pinto Developer Console.
+
+Find your bot webhook setting.
+
+Paste:
+
+```text
+https://xxxx.trycloudflare.com/plugins/pinto/webhook
+```
+
+Save.
+
+Now Pinto can send chat messages to Hermes.
+
+---
+
+# Step 10: Chat with Hermes through Pinto
+
+Open Pinto app / chat UI.
+
+Send a message to your bot, for example:
+
+```text
+hello
+```
+
+Flow:
+
+```text
+Pinto chat message
+  -> Pinto webhook
+  -> Cloudflare Quick Tunnel
+  -> Hermes Gateway
+  -> AI provider
+  -> Hermes reply
+  -> Pinto chat
+```
+
+If configured correctly, bot replies in Pinto.
+
+---
+
+# Step 11: Test AI provider manually
+
+If webhook works but bot does not answer, test Hermes AI provider directly.
+
+## Podman
+
 ```bash
-docker compose logs --tail=50 hermes-gateway
+podman exec -it hermes-fakduai-pinto_hermes-gateway_1 hermes -z "reply only: ok" --provider openai-api --model "$HERMES_MODEL"
 ```
 
-### `Pinto plugin not found`
-
-Plugin ไม่ถูกติดตั้ง —  rebuild:
-```bash
-docker compose build --no-cache
-docker compose up -d
-```
-
-### `Unable to reach the origin service`
-
-Cloudflare รันอยู่แต่ Hermes ไม่ listen ที่ 8642:
+If `$HERMES_MODEL` is not available in your shell, use model name directly:
 
 ```bash
-docker compose ps
-docker compose logs --tail=100 hermes-gateway
-docker compose restart hermes-gateway
+podman exec -it hermes-fakduai-pinto_hermes-gateway_1 hermes -z "reply only: ok" --provider openai-api --model codex
 ```
 
-### Quick Tunnel URL เปลี่ยน
+Expected:
 
-เป็นเรื่องปกติ — Quick Tunnel URLs เป็นแบบชั่วคราว
-
-อัปเดต:
-- Pinto webhook URL
-
-สำหรับ URL คงที่ ใช้ named Cloudflare Tunnel กับ domain ของคุณเอง
-
-## File Structure
-
-```
-hermes-pinto-docker/
-├── Dockerfile                          # Hermes + Pinto plugin image
-├── docker-compose.yml                  # Main compose (gateway + cli)
-├── docker-compose.cloudflare.yml       # Named Cloudflare Tunnel overlay
-├── docker-compose.trycloudflare.yml    # Quick Tunnel overlay
-├── .env.example                        # Environment template
-├── .dockerignore
-├── .gitignore
-├── LICENSE
-├── README.md                           # This file
-└── scripts/
-    ├── docker-entrypoint.sh            # Container entrypoint
-    ├── bootstrap-hermes-config.py      # Auto-configure Hermes
-    ├── configure-domain.sh             # Interactive setup script
-    └── generate-api-key.sh             # Generate API_SERVER_KEY
+```text
+ok
 ```
 
-## Related
+## Docker
 
-- **Adapter Plugin:** [pinto-adapter-hermes](https://github.com/fakduai-logistics-and-digital-platform/pinto-adapter-hermes)
-- **Hermes Agent:** [hermes-agent](https://github.com/NousResearch/hermes-agent)
-- **OpenClaw Pattern:** [openclaw-fakduai-pinto](https://github.com/jatura-fakduai/openclaw-fakduai-pinto)
+Find container name:
 
-## Author
+```bash
+docker ps
+```
 
-**Theeraphat S** ([@Theeraphat-S](https://github.com/Theeraphat-S))
+Then run:
 
-## License
+```bash
+docker exec -it <gateway-container-name> hermes -z "reply only: ok" --provider openai-api --model codex
+```
+
+Windows PowerShell:
+
+```powershell
+docker ps
+
+docker exec -it <gateway-container-name> hermes -z "reply only: ok" --provider openai-api --model codex
+```
+
+Expected:
+
+```text
+ok
+```
+
+---
+
+# Quick Tunnel warning
+
+Cloudflare Quick Tunnel URLs are temporary.
+
+If you:
+
+- stop containers
+- restart cloudflared
+- reboot machine
+- run `down`
+
+URL may change.
+
+If URL changes:
+
+1. Run tunnel start/status script again.
+2. Copy new Pinto Webhook URL.
+3. Update webhook URL in Pinto Developer Console.
+
+For production, use Cloudflare Named Tunnel + your own domain.
+
+---
+
+# Production: stable Cloudflare domain
+
+Quick Tunnel is for testing.
+
+For stable webhook URL, use named Cloudflare Tunnel.
+
+You need:
+
+```env
+CLOUDFLARE_TUNNEL_TOKEN=your_named_tunnel_token
+```
+
+Then run compose with:
+
+```bash
+docker compose -f docker-compose.docker.yml -f docker-compose.cloudflare.yml up -d
+```
+
+Podman:
+
+```bash
+podman-compose -f docker-compose.podman.yml -f docker-compose.cloudflare.yml up -d
+```
+
+Your webhook becomes stable, for example:
+
+```text
+https://your-domain.com/plugins/pinto/webhook
+```
+
+---
+
+# Common commands
+
+## Podman
+
+```bash
+scripts/podman-start.sh
+scripts/podman-status.sh
+scripts/podman-stop.sh
+
+scripts/podman-tunnel-start.sh
+scripts/podman-tunnel-status.sh
+scripts/podman-tunnel-stop.sh
+```
+
+Logs:
+
+```bash
+podman-compose -f docker-compose.podman.yml logs -f hermes-gateway
+podman-compose -f docker-compose.podman.yml -f docker-compose.trycloudflare.yml logs -f cloudflared
+```
+
+Rebuild:
+
+```bash
+podman-compose -f docker-compose.podman.yml build --no-cache
+```
+
+## Docker macOS / Linux
+
+```bash
+docker compose -f docker-compose.docker.yml up -d --build
+docker compose -f docker-compose.docker.yml ps
+docker compose -f docker-compose.docker.yml down
+```
+
+Tunnel:
+
+```bash
+docker compose -f docker-compose.docker.yml -f docker-compose.trycloudflare.yml up -d --build
+docker compose -f docker-compose.docker.yml -f docker-compose.trycloudflare.yml logs -f cloudflared
+docker compose -f docker-compose.docker.yml -f docker-compose.trycloudflare.yml down
+```
+
+## Windows PowerShell
+
+```powershell
+.\scripts\docker-start.ps1
+.\scripts\docker-status.ps1
+.\scripts\docker-stop.ps1
+
+.\scripts\docker-tunnel-start.ps1
+.\scripts\docker-tunnel-status.ps1
+.\scripts\docker-tunnel-stop.ps1
+```
+
+---
+
+# Troubleshooting
+
+## `PINTO_BOT_ID not set!`
+
+Set this in `.env`:
+
+```env
+PINTO_BOT_ID=your_pinto_bot_id_here
+```
+
+Restart.
+
+---
+
+## Gateway health fails
+
+Check logs.
+
+Podman:
+
+```bash
+podman-compose -f docker-compose.podman.yml logs --tail=100 hermes-gateway
+```
+
+Docker:
+
+```bash
+docker compose -f docker-compose.docker.yml logs --tail=100 hermes-gateway
+```
+
+Expected health URL:
+
+```text
+http://127.0.0.1:8642/health
+```
+
+---
+
+## Dashboard does not open
+
+Dashboard is not on port `8642`.
+
+Use:
+
+```text
+http://127.0.0.1:9119/
+```
+
+---
+
+## Webhook returns `500 Internal Server Error`
+
+Check gateway logs.
+
+Podman:
+
+```bash
+podman-compose -f docker-compose.podman.yml -f docker-compose.trycloudflare.yml logs --tail=150 hermes-gateway
+```
+
+Docker:
+
+```bash
+docker compose -f docker-compose.docker.yml -f docker-compose.trycloudflare.yml logs --tail=150 hermes-gateway
+```
+
+Common causes:
+
+- missing `PINTO_BOT_ID`
+- missing AI provider config
+- invalid AI API key
+- Pinto send API error
+- wrong webhook payload
+
+---
+
+## Logs say `No inference provider configured`
+
+Add AI provider config to `.env`:
+
+```env
+OPENAI_API_KEY=your_api_key_here
+OPENAI_BASE_URL=http://your-ai-server:port/v1
+HERMES_PROVIDER=openai-api
+HERMES_MODEL=codex
+```
+
+Also ensure `hermes-config/.env` has same provider values after first bootstrap.
+
+Restart.
+
+---
+
+## AI test works but Pinto does not receive reply
+
+If logs show:
+
+```text
+Pinto HTTP 500: {"ok":false,"error":"Failed to send message"}
+```
+
+Hermes received message and generated reply, but Pinto rejected send-back request.
+
+Check:
+
+- real `chat_id` from Pinto, not fake test payload
+- `PINTO_BOT_ID` correct
+- `PINTO_API_URL` correct
+- `PINTO_WEBHOOK_SECRET` if your Pinto setup requires one
+- bot permission in Pinto
+
+---
+
+## Cloudflare URL does not resolve / 1033 / 1034
+
+Quick Tunnel sometimes prints a URL before Cloudflare is ready.
+
+Run tunnel script again.
+
+Podman:
+
+```bash
+scripts/podman-tunnel-start.sh
+```
+
+Windows:
+
+```powershell
+.\scripts\docker-tunnel-start.ps1
+```
+
+Then update Pinto webhook URL with new URL.
+
+---
+
+## Windows PowerShell blocks script
+
+If PowerShell blocks `.ps1` scripts:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+Then rerun script.
+
+---
+
+## Windows line ending issue
+
+If Bash scripts show:
+
+```text
+/bin/bash^M: bad interpreter
+```
+
+Use PowerShell scripts on Windows, or convert line endings to LF.
+
+---
+
+# Security notes
+
+Do not commit `.env`.
+
+`.env` may contain:
+
+```text
+API_SERVER_KEY
+OPENAI_API_KEY
+PINTO_WEBHOOK_SECRET
+CLOUDFLARE_TUNNEL_TOKEN
+```
+
+For public bots, avoid `GATEWAY_ALLOW_ALL_USERS=true` unless you intentionally want anyone to chat with your bot.
+
+For testing, this repo defaults to open access because Pinto user IDs can vary during setup.
+
+For production, configure allowlists instead.
+
+---
+
+# License
 
 MIT

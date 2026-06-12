@@ -1,14 +1,14 @@
 services:
   hermes-gateway:
-    image: ${HERMES_IMAGE:-hermes-pinto:local}
+    image: ${HERMES_IMAGE:-hermes-pinto:podman}
     build:
       context: .
+      dockerfile: Dockerfile.podman
       args:
         PINTO_ADAPTER_REPO: ${PINTO_ADAPTER_REPO:-https://github.com/fakduai-logistics-and-digital-platform/pinto-adapter-hermes.git}
         PINTO_ADAPTER_REF: ${PINTO_ADAPTER_REF:-main}
     env_file:
-      - path: .env
-        required: false
+      - .env
     environment:
       HOME: /root
       HERMES_HOME: /root/.hermes
@@ -20,42 +20,65 @@ services:
       PINTO_WEBHOOK_PATH: ${PINTO_WEBHOOK_PATH:-/plugins/pinto/webhook}
       PINTO_HOME_CHANNEL: ${PINTO_HOME_CHANNEL:-}
       PINTO_ALLOW_ALL_USERS: ${PINTO_ALLOW_ALL_USERS:-true}
-      TZ: ${TZ:-UTC}
+      GATEWAY_ALLOW_ALL_USERS: ${GATEWAY_ALLOW_ALL_USERS:-true}
+      TZ: ${TZ:-Asia/Bangkok}
     volumes:
       - ./hermes-config:/root/.hermes
     ports:
       - "${HERMES_GATEWAY_PORT:-8642}:8642"
     restart: unless-stopped
     healthcheck:
-      test:
-        [
-          "CMD",
-          "python3",
-          "-c",
-          "import urllib.request,sys; r=urllib.request.urlopen('http://127.0.0.1:8642/'); sys.exit(0 if r.status==200 else 1)",
-        ]
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; r=urllib.request.urlopen('http://127.0.0.1:8642/health'); sys.exit(0 if r.status==200 else 1)"]
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 30s
 
-  hermes-cli:
-    image: ${HERMES_IMAGE:-hermes-pinto:local}
+  hermes-dashboard:
+    image: ${HERMES_IMAGE:-hermes-pinto:podman}
     build:
       context: .
+      dockerfile: Dockerfile.podman
+      args:
+        PINTO_ADAPTER_REPO: ${PINTO_ADAPTER_REPO:-https://github.com/fakduai-logistics-and-digital-platform/pinto-adapter-hermes.git}
+        PINTO_ADAPTER_REF: ${PINTO_ADAPTER_REF:-main}
+    env_file:
+      - .env
+    environment:
+      HOME: /root
+      HERMES_HOME: /root/.hermes
+      HERMES_DASHBOARD: "1"
+      API_SERVER_KEY: ${API_SERVER_KEY:-}
+      API_SERVER_HOST: ${API_SERVER_HOST:-0.0.0.0}
+      GATEWAY_ALLOW_ALL_USERS: ${GATEWAY_ALLOW_ALL_USERS:-true}
+      TZ: ${TZ:-Asia/Bangkok}
+    volumes:
+      - ./hermes-config:/root/.hermes
+    ports:
+      - "${HERMES_DASHBOARD_PORT:-9119}:9119"
+    command: ["hermes", "dashboard", "--host", "0.0.0.0", "--port", "9119", "--no-open", "--insecure"]
+    depends_on:
+      - hermes-gateway
+    restart: unless-stopped
+
+  hermes-cli:
+    image: ${HERMES_IMAGE:-hermes-pinto:podman}
+    build:
+      context: .
+      dockerfile: Dockerfile.podman
       args:
         PINTO_ADAPTER_REPO: ${PINTO_ADAPTER_REPO:-https://github.com/fakduai-logistics-and-digital-platform/pinto-adapter-hermes.git}
         PINTO_ADAPTER_REF: ${PINTO_ADAPTER_REF:-main}
     network_mode: "service:hermes-gateway"
     env_file:
-      - path: .env
-        required: false
+      - .env
     environment:
       HOME: /root
       HERMES_HOME: /root/.hermes
       API_SERVER_KEY: ${API_SERVER_KEY:-}
       API_SERVER_HOST: ${API_SERVER_HOST:-0.0.0.0}
-      TZ: ${TZ:-UTC}
+      GATEWAY_ALLOW_ALL_USERS: ${GATEWAY_ALLOW_ALL_USERS:-true}
+      TZ: ${TZ:-Asia/Bangkok}
     volumes:
       - ./hermes-config:/root/.hermes
     entrypoint: ["hermes"]
