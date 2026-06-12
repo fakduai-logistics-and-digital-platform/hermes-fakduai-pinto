@@ -1,0 +1,12 @@
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --url
+      - http://hermes-gateway:8642
+    depends_on:
+      hermes-gateway:
+        condition: service_healthy
+    restart: unless-stopped
