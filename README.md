@@ -1,6 +1,6 @@
 # Hermes + Pinto Docker
 
-<img width="1536" alt="image" src="https://github.com/user-attachments/assets/6e9f5963-74b3-402b-a385-5a3112d3329a" />
+<img width="1448" alt="image" src="https://github.com/user-attachments/assets/4989fc29-cbda-49f3-b32e-c40e38577eef" />
 
 
 This project builds a Hermes Agent Docker image with the Pinto Chat adapter plugin included.
