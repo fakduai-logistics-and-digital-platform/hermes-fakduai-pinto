@@ -1,8 +1,9 @@
 # Hermes + Pinto Docker
 
-This project builds a Hermes Agent Docker image with the Pinto Chat adapter plugin included.
+<img width="1536" alt="image" src="https://github.com/user-attachments/assets/6e9f5963-74b3-402b-a385-5a3112d3329a" />
 
-Based on the [OpenClaw Pinto Docker](https://github.com/jatura-fakduai/openclaw-fakduai-pinto) pattern.
+
+This project builds a Hermes Agent Docker image with the Pinto Chat adapter plugin included.
 
 ## What Is Included
 
