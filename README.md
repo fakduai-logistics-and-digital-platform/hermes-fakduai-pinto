@@ -222,6 +222,58 @@ HERMES_PROVIDER=openai-api
 HERMES_MODEL=codex
 ```
 
+## BytePlus ARK example
+
+BytePlus ARK also exposes an OpenAI-compatible Chat Completions API.
+
+Use the base API path, not the full `/responses` path:
+
+```env
+ARK_API_KEY=your_ark_api_key_here
+BYTEPLUS_ARK_BASE_URL=https://ark.ap-southeast.bytepluses.com/api/v3
+BYTEPLUS_ARK_MODEL=seed-2-0-pro-260328
+```
+
+Then configure Hermes custom provider in `hermes-config/config.yaml`:
+
+```yaml
+model:
+  provider: custom:byteplus-ark
+  model: seed-2-0-pro-260328
+  default: seed-2-0-pro-260328
+  base_url: https://ark.ap-southeast.bytepluses.com/api/v3
+  api_mode: chat_completions
+
+providers:
+  byteplus-ark:
+    name: byteplus-ark
+    base_url: https://ark.ap-southeast.bytepluses.com/api/v3
+    key_env: ARK_API_KEY
+    api_mode: chat_completions
+    model: seed-2-0-pro-260328
+```
+
+Why `chat_completions`?
+
+- ARK `/responses` can work with direct curl.
+- Hermes Responses-mode may send extra fields that ARK rejects, such as `summary`.
+- ARK `/chat/completions` works cleanly with Hermes.
+
+Test:
+
+```bash
+podman exec -it hermes-fakduai-pinto_hermes-gateway_1 \
+  hermes -z "reply only: ok" \
+  --provider custom:byteplus-ark \
+  --model seed-2-0-pro-260328
+```
+
+Expected:
+
+```text
+ok
+```
+
 Do not commit `.env`. It contains secrets.
 
 ---
