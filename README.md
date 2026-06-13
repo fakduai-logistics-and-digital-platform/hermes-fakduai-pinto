@@ -783,6 +783,7 @@ Check:
 - `PINTO_BOT_ID` correct
 - `PINTO_API_URL` correct
 - `PINTO_WEBHOOK_SECRET` if your Pinto setup requires one
+- `PINTO_BEARER_TOKEN` if you want native Pinto chat API, real typing, and binary image upload
 - bot permission in Pinto
 
 ---
@@ -843,6 +844,7 @@ Do not commit `.env`.
 API_SERVER_KEY
 OPENAI_API_KEY
 PINTO_WEBHOOK_SECRET
+PINTO_BEARER_TOKEN
 CLOUDFLARE_TUNNEL_TOKEN
 ```
 
