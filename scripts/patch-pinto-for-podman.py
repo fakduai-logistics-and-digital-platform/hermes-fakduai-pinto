@@ -100,6 +100,9 @@ media_init_new = '''        self._webhook_path = extra.get("webhookPath") or os.
         )
         self._media_path = os.getenv("PINTO_MEDIA_PATH", "/plugins/pinto/media")
         self._media_files: dict[str, str] = {}
+        self._typing_last_sent: dict[str, float] = {}
+        self._typing_status_message = os.getenv("PINTO_TYPING_STATUS_MESSAGE", "")
+        self._typing_status_interval = float(os.getenv("PINTO_TYPING_STATUS_INTERVAL", "20"))
         self._client: Optional["_httpx.AsyncClient"] = None
 '''
 if media_init_old in s:
@@ -195,6 +198,16 @@ elif 'self._media_url_for_file(str(media_files[0]))' in s:
     print('Pinto adapter media send patch already applied')
 else:
     raise SystemExit('Expected Pinto media send block not found')
+
+typing_old = '''    async def send_typing(self, chat_id: str) -> None:\n        pass  # Pinto has no typing indicator API\n'''
+typing_new = '''    async def send_typing(self, chat_id: str, metadata=None) -> None:\n        """Send a throttled status message while Hermes is processing.\n\n        Pinto does not currently expose a native typing indicator endpoint to\n        this adapter. If PINTO_TYPING_STATUS_MESSAGE is set, use a lightweight\n        chat message as a fallback and throttle it per chat.\n        """\n        if not self._typing_status_message:\n            return\n        now = time.time()\n        last = self._typing_last_sent.get(chat_id, 0)\n        if now - last < self._typing_status_interval:\n            return\n        self._typing_last_sent[chat_id] = now\n        await self.send(chat_id, self._typing_status_message)\n'''
+if typing_old in s:
+    s = s.replace(typing_old, typing_new)
+    patched = True
+elif 'PINTO_TYPING_STATUS_MESSAGE' in s:
+    print('Pinto adapter typing status patch already applied')
+else:
+    raise SystemExit('Expected Pinto send_typing block not found')
 
 p.write_text(s, encoding='utf-8')
 print('Patched Pinto adapter for Hermes 0.16 compatibility' if patched else 'Pinto adapter already patched')
