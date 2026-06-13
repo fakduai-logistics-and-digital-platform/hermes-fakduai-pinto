@@ -22,8 +22,10 @@ ARG PINTO_ADAPTER_REF=main
 
 COPY scripts/patch-pinto-for-podman.py /tmp/patch-pinto-for-podman.py
 COPY scripts/patch-api-server-for-pinto-podman.py /tmp/patch-api-server-for-pinto-podman.py
+COPY scripts/patch-openai-image-provider.py /tmp/patch-openai-image-provider.py
 
 RUN python3 /tmp/patch-api-server-for-pinto-podman.py
+RUN python3 /tmp/patch-openai-image-provider.py
 
 RUN git clone --depth 1 --branch "${PINTO_ADAPTER_REF}" "${PINTO_ADAPTER_REPO}" /tmp/pinto-adapter \
     && mkdir -p /opt/hermes-pinto-plugin \
@@ -31,7 +33,7 @@ RUN git clone --depth 1 --branch "${PINTO_ADAPTER_REF}" "${PINTO_ADAPTER_REPO}" 
     && cp /tmp/pinto-adapter/plugin.yaml /opt/hermes-pinto-plugin/plugin.yaml \
     && cp /tmp/pinto-adapter/__init__.py /opt/hermes-pinto-plugin/__init__.py \
     && python3 /tmp/patch-pinto-for-podman.py \
-    && rm -rf /tmp/pinto-adapter /tmp/patch-pinto-for-podman.py /tmp/patch-api-server-for-pinto-podman.py
+    && rm -rf /tmp/pinto-adapter /tmp/patch-pinto-for-podman.py /tmp/patch-api-server-for-pinto-podman.py /tmp/patch-openai-image-provider.py
 
 # Copy scripts
 COPY scripts/docker-entrypoint.sh /usr/local/bin/hermes-pinto-entrypoint

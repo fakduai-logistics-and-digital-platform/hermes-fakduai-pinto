@@ -42,15 +42,17 @@ if [ "$code" != "200" ]; then
 fi
 
 WEBHOOK_URL="$URL/plugins/pinto/webhook"
-if [ -f .env ]; then
-  if grep -q '^PINTO_WEBHOOK_URL=' .env; then
-    tmp="$(mktemp)"
-    sed "s|^PINTO_WEBHOOK_URL=.*|PINTO_WEBHOOK_URL=$WEBHOOK_URL|" .env > "$tmp"
-    mv "$tmp" .env
-  else
-    printf '\nPINTO_WEBHOOK_URL=%s\n' "$WEBHOOK_URL" >> .env
+for env_file in .env hermes-config/.env; do
+  if [ -f "$env_file" ]; then
+    if grep -q '^PINTO_WEBHOOK_URL=' "$env_file"; then
+      tmp="$(mktemp)"
+      sed "s|^PINTO_WEBHOOK_URL=.*|PINTO_WEBHOOK_URL=$WEBHOOK_URL|" "$env_file" > "$tmp"
+      mv "$tmp" "$env_file"
+    else
+      printf '\nPINTO_WEBHOOK_URL=%s\n' "$WEBHOOK_URL" >> "$env_file"
+    fi
   fi
-fi
+done
 printf '\nCloudflare URL:\n%s\n\nPinto Webhook URL:\n%s\n\n' "$URL" "$WEBHOOK_URL"
 printf 'Health:\n'
 curl -sS "$URL/health" || true
