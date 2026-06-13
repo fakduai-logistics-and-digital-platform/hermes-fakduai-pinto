@@ -53,7 +53,7 @@ for env_file in .env hermes-config/.env; do
     fi
   fi
 done
-printf '\nCloudflare URL:\n%s\n\nPinto Webhook URL:\n%s\n\n' "$URL" "$WEBHOOK_URL"
+printf '\nCloudflare URL:\n%s\n\nPinto Developer Console values:\nWebhook URL: %s\nWebhook Secret: open Hermes Dashboard > Pinto Chat > Configure > reveal/copy Webhook Secret\n\n' "$URL" "$WEBHOOK_URL"
 printf 'Health:\n'
 curl -sS "$URL/health" || true
 printf '\n\nWebhook health:\n'

@@ -89,6 +89,18 @@ OPENAI_BASE_URL=http://45.136.254.176:20128/v1
 HERMES_PROVIDER=openai-api
 HERMES_MODEL=codex
 ```
+
+Nous Portal / Nemotron 3 Ultra free-tier option:
+```env
+HERMES_PROVIDER=nous
+HERMES_MODEL=nvidia/nemotron-3-ultra:free
+```
+Notes:
+- Requires Hermes OAuth login via `hermes setup --portal` in the Hermes environment.
+- Verify with `hermes portal info`.
+- The exact `:free` suffix is required for the free-tier variant.
+- The offer was announced as limited-time; if unavailable, check Nous Portal model picker.
+
 Do not print or commit real API keys.
 
 Cloudflare Quick Tunnel behavior:

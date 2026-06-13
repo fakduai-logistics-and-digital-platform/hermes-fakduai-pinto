@@ -222,6 +222,53 @@ HERMES_PROVIDER=openai-api
 HERMES_MODEL=codex
 ```
 
+## Nous Portal / Nemotron 3 Ultra free-tier option
+
+Hermes can use **Nous Portal** as provider. Nous documentation lists the free Nemotron 3 Ultra variant as:
+
+```text
+nvidia/nemotron-3-ultra:free
+```
+
+The `:free` suffix is required for the no-cost variant. The offer was announced as limited-time, so check the Nous Portal model picker if it is no longer available.
+
+Use this when you have connected Hermes to Nous Portal with OAuth:
+
+```bash
+hermes setup --portal
+hermes portal info
+```
+
+Then set `.env`:
+
+```env
+HERMES_PROVIDER=nous
+HERMES_MODEL=nvidia/nemotron-3-ultra:free
+```
+
+If the model picker is available inside a Hermes session, you can also switch with:
+
+```text
+/model nvidia/nemotron-3-ultra:free
+```
+
+For this repo's container setup, make sure the Hermes environment inside the container has a valid Nous Portal login before using `HERMES_PROVIDER=nous`.
+
+Test:
+
+```bash
+podman exec -it hermes-fakduai-pinto_hermes-gateway_1 \
+  hermes -z "reply only: ok" \
+  --provider nous \
+  --model nvidia/nemotron-3-ultra:free
+```
+
+Expected:
+
+```text
+ok
+```
+
 ## BytePlus ARK example
 
 BytePlus ARK also exposes an OpenAI-compatible Chat Completions API.
