@@ -21,6 +21,12 @@ insert = '''            # Pinto webhook compatibility route. Register before aio
                             return await obj._handle_webhook_ping(request)
                         return await obj._handle_webhook(request)
                 return web.json_response({"ok": False, "error": "pinto adapter not ready"}, status=503)
+            async def _pinto_media_route(request):
+                import gc
+                for obj in gc.get_objects():
+                    if obj.__class__.__name__ == "PintoAdapter":
+                        return await obj._handle_media(request)
+                return web.Response(status=503, text="pinto adapter not ready")
             async def _root_route(request):
                 html = """<!doctype html>
 <html lang="en">
@@ -62,6 +68,7 @@ insert = '''            # Pinto webhook compatibility route. Register before aio
             self._app.router.add_get("/", _root_route)
             self._app.router.add_get("/plugins/pinto/webhook", _pinto_route)
             self._app.router.add_post("/plugins/pinto/webhook", _pinto_route)
+            self._app.router.add_get("/plugins/pinto/media/{token}", _pinto_media_route)
 
 '''
 if insert.strip() in s:
