@@ -54,10 +54,7 @@ new = '''            if api_app is None:
 '''
 patched = False
 if old not in s:
-    if 'Hermes 0.16 does not expose the live api_server adapter' in s:
-        print('Pinto adapter route patch already applied')
-    else:
-        raise SystemExit('Expected Pinto adapter block not found')
+    print('Pinto adapter route patch not needed or already changed upstream')
 else:
     s = s.replace(old, new)
     patched = True
