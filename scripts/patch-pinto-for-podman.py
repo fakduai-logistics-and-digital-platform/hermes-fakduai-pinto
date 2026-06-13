@@ -87,6 +87,10 @@ elif 'from urllib.parse import urlparse' in s:
 else:
     raise SystemExit('Expected Pinto import block not found')
 
+if 'import re\n' not in s:
+    s = s.replace('import os\n', 'import os\nimport re\n', 1)
+    patched = True
+
 media_init_old = '''        self._webhook_path = extra.get("webhookPath") or os.getenv(
             "PINTO_WEBHOOK_PATH", DEFAULT_WEBHOOK_PATH
         )
@@ -187,12 +191,24 @@ media_send_old = '''        media_files = kwargs.get("media_files")
 media_send_new = '''        media_files = kwargs.get("media_files")
         if media_files:
             payload["media_url"] = self._media_url_for_file(str(media_files[0]))
+        elif text:
+            match = re.search(r"(/[^\\s]+\\.(?:png|jpg|jpeg|gif|webp))", text, re.IGNORECASE)
+            if match:
+                media_url = self._media_url_for_file(match.group(1))
+                if media_url != match.group(1):
+                    payload["media_url"] = media_url
 '''
 if media_send_old in s:
     s = s.replace(media_send_old, media_send_new)
     patched = True
+elif 're.search(r"(/[^\\s]+\\.(?:png|jpg|jpeg|gif|webp))"' in s:
+    print('Pinto adapter text path media patch already applied')
 elif 'self._media_url_for_file(str(media_files[0]))' in s:
-    print('Pinto adapter media send patch already applied')
+    s = s.replace('''        media_files = kwargs.get("media_files")
+        if media_files:
+            payload["media_url"] = self._media_url_for_file(str(media_files[0]))
+''', media_send_new)
+    patched = True
 else:
     raise SystemExit('Expected Pinto media send block not found')
 
