@@ -1103,6 +1103,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             pm_message = (
                 f"User request for proton company workflow:\\n{task_text}\\n\\n"
                 f"You are '{pm_key}'. Break this into role-specific tasks for these agents: {', '.join(worker_chain)}.\n"
+                "If the user asks to run, preview, host, deploy, open, or show the product, route that request directly to frontend and/or backend dev tasks. Do not make the user run it themselves unless credentials or environment are missing.\n"
                 "Return concise Thai planning plus a JSON object at the end in this exact shape:\\n"
                 '{"tasks":[{"agent":"designer","task":"..."}],"notes":"..."}\n'
                 "Only include available agents. Each task must be different and fit that role."
@@ -1271,8 +1272,8 @@ company_role_prompt_method = '''    def _company_role_prompt(self, role_key: str
             skill_map = {
                 "pm": ["skills/stop-slop/SKILL.md", "skills/9arm/skills/productivity/management-talk/SKILL.md", "skills/9arm/skills/productivity/qwenchance/SKILL.md", "skills/karpathy-guidelines/SKILL.md"],
                 "designer": ["skills/taste-skill/skills/taste-skill/SKILL.md", "skills/karpathy-guidelines/SKILL.md"],
-                "frontend": ["skills/taste-skill/skills/taste-skill/SKILL.md", "skills/karpathy-guidelines/SKILL.md"],
-                "backend": ["skills/karpathy-guidelines/SKILL.md", "skills/mattpocock/engineering/tdd/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/mattpocock/engineering/domain-modeling/SKILL.md", "skills/9arm/skills/engineering/debug-mantra/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md"],
+                "frontend": ["skills/taste-skill/skills/taste-skill/SKILL.md", "skills/karpathy-guidelines/SKILL.md", "skills/cloudflare/skills/cloudflare/SKILL.md", "skills/cloudflare/skills/wrangler/SKILL.md", "skills/cloudflare/skills/workers-best-practices/SKILL.md"],
+                "backend": ["skills/karpathy-guidelines/SKILL.md", "skills/mattpocock/engineering/tdd/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/mattpocock/engineering/domain-modeling/SKILL.md", "skills/9arm/skills/engineering/debug-mantra/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md", "skills/cloudflare/skills/cloudflare/SKILL.md", "skills/cloudflare/skills/wrangler/SKILL.md", "skills/cloudflare/skills/workers-best-practices/SKILL.md"],
                 "qa": ["skills/karpathy-guidelines/SKILL.md", "skills/mattpocock/deprecated/qa/SKILL.md", "skills/mattpocock/in-progress/review/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/mattpocock/engineering/tdd/SKILL.md", "skills/mattpocock/engineering/triage/SKILL.md", "skills/9arm/skills/engineering/debug-mantra/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md"],
                 "techlead": ["skills/karpathy-guidelines/SKILL.md", "skills/stop-slop/SKILL.md", "skills/mattpocock/engineering/codebase-design/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md", "skills/9arm/skills/engineering/post-mortem/SKILL.md", "skills/9arm/skills/productivity/management-talk/SKILL.md"],
             }
