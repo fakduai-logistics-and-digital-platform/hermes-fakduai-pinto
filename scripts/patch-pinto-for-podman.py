@@ -1255,7 +1255,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             import time
             path = self._company_requirement_path(chat_id)
             path.parent.mkdir(parents=True, exist_ok=True)
-            entry = f"\n\n## {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n{text.strip()[:4000]}\n"
+            entry = f"\\n\\n## {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\\n{text.strip()[:4000]}\\n"
             with path.open("a", encoding="utf-8") as fh:
                 fh.write(entry)
         except Exception:
