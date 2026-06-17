@@ -92,6 +92,7 @@ Local Hermes-only multi-agent handoff (no OpenClaw involved):
 - Needs `API_SERVER_KEY` from `.env`/`hermes-config/.env` and the gateway
   reachable at `http://127.0.0.1:8642` (override with `--api-base`).
 - Run history is written to `hermes-config/company-runs/` (ignored by git).
+- Pinto bots can be connected directly by adding `companyWorkflow: [persona1, persona2, ...]` to `platforms.pinto.extra.bots.<bot_id>`; the adapter intercepts that bot's webhook, runs the chain, and sends the final output back to the Pinto chat.
 - This is a custom layer on top of Hermes; Hermes core has no native
   persistent agent registry or agent-to-agent tool like OpenClaw.
 

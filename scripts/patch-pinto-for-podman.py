@@ -601,5 +601,130 @@ elif 'bot_config.get("persona")' in s and 'self._persona_configs' in s:
 else:
     raise SystemExit('Expected Pinto _bot_channel_prompt block not found')
 
+# Optional company workflow mode: when a bot's config has a truthy
+# "companyWorkflow" field, run a local sequential persona handoff chain
+# (Hermes-only, no OpenClaw) instead of the normal single-turn agent run,
+# then send the final handoff output back to the chat directly.
+company_marker = '            self._active_bot_by_chat[str(chat_id)] = str(bot_id)\n            channel_prompt = self._bot_channel_prompt(bot_config)\n'
+if 'await self._run_company_workflow(' not in s:
+    if company_marker not in s:
+        raise SystemExit('Expected Pinto webhook bot_config/channel_prompt marker not found')
+    company_branch = company_marker + '''
+            if bot_config.get("companyWorkflow"):
+                asyncio.create_task(self._run_company_workflow(str(chat_id), str(bot_id), bot_config, message_text))
+                return request.app["response_class"](
+                    status=200,
+                    text=json.dumps({"ok": True, "queued": True, "mode": "company_workflow"}),
+                    content_type="application/json",
+                )
+'''
+    s = s.replace(company_marker, company_branch, 1)
+    patched = True
+else:
+    print('Pinto adapter company workflow branch already applied')
+
+company_method_marker = '    def _bot_channel_prompt(self, bot_config: dict) -> Optional[str]:\n'
+if 'async def _run_company_workflow(' not in s:
+    if company_method_marker not in s:
+        raise SystemExit('Expected _bot_channel_prompt def marker not found')
+    company_method = '''    async def _run_company_workflow(self, chat_id: str, bot_id: str, bot_config: dict, task_text: str) -> None:
+        """Run a local sequential persona handoff chain and send the final output.
+
+        This is a small Hermes-only orchestrator: it does not call OpenClaw or
+        any external agent registry. Chain order comes from bot_config["companyWorkflow"]
+        (a list of persona keys) or platforms.pinto.extra.companyWorkflows.default.
+        Each persona\'s reply becomes the next persona\'s input.
+        """
+        try:
+            await self.send_typing(chat_id)
+            chain = bot_config.get("companyWorkflow")
+            if not isinstance(chain, list) or not chain:
+                extra = getattr(self, "_extra_config", None) or {}
+                workflows = extra.get("companyWorkflows") if isinstance(extra, dict) else None
+                default_chain = workflows.get("default") if isinstance(workflows, dict) else None
+                chain = default_chain if isinstance(default_chain, list) and default_chain else list(getattr(self, "_persona_configs", {}) or {})
+            chain = [str(key) for key in chain if key]
+            if not chain:
+                await self.send(chat_id, "\u26a0\ufe0f \u0e22\u0e31\u0e07\u0e44\u0e21\u0e48\u0e44\u0e14\u0e49\u0e15\u0e35\u0e49\u0e07\u0e04\u0e48\u0e32 company workflow (pintoAgents \u0e27\u0e48\u0e32\u0e07)")
+                return
+
+            handoff = task_text
+            steps = []
+            personas = getattr(self, "_persona_configs", {}) or {}
+            for key in chain:
+                persona_cfg = personas.get(key) if isinstance(personas, dict) else None
+                persona_cfg = persona_cfg if isinstance(persona_cfg, dict) else {}
+                prompt = self._bot_channel_prompt({"persona": key}) or f"You are {key}."
+                user_message = (
+                    f"Company workflow task:\\n{task_text}\\n\\n"
+                    f"Current handoff/input for persona '{key}':\\n{handoff}\\n\\n"
+                    "Return concise output plus any explicit handoff notes for the next persona."
+                )
+                reply = await self._run_persona_turn(prompt, user_message)
+                steps.append({"persona": key, "output": reply})
+                handoff = reply
+
+            await self.send(chat_id, handoff)
+        except Exception:
+            logger.exception("Pinto company workflow failed chat_id=%s bot_id=%s", chat_id, bot_id)
+            try:
+                await self.send(chat_id, "\u2716\ufe0f company workflow \u0e25\u0e49\u0e21\u0e40\u0e2b\u0e25\u0e27 \u0e14\u0e39 log \u0e1d\u0e31\u0e48\u0e07 Hermes Gateway")
+            except Exception:
+                pass
+
+    async def _run_persona_turn(self, system_prompt: str, user_message: str) -> str:
+        """Run a single persona turn through the in-process Hermes agent."""
+        loop = asyncio.get_running_loop()
+
+        def _run_sync() -> str:
+            from gateway.session_context import clear_session_vars, set_session_vars
+
+            session_tokens = []
+            try:
+                session_tokens = set_session_vars(platform="pinto", session_key=f"company:{uuid.uuid4().hex}")
+                agent = self._create_company_agent(system_prompt)
+                result = agent.run_conversation(user_message=user_message, conversation_history=[], task_id=uuid.uuid4().hex)
+            finally:
+                if session_tokens:
+                    try:
+                        clear_session_vars(session_tokens)
+                    except Exception:
+                        pass
+            if isinstance(result, dict):
+                if result.get("failed"):
+                    return str(result.get("error") or "agent run failed")
+                return str(result.get("final_response") or "")
+            return str(result or "")
+
+        return await loop.run_in_executor(None, _run_sync)
+
+    def _create_company_agent(self, system_prompt: str):
+        """Best-effort construction of a Hermes agent for one persona turn.
+
+        Looks up the live APIServerAdapter via gc (same compatibility shim used
+        for webhook mounting) so persona turns reuse the same agent factory and
+        provider/model configuration as the rest of the gateway.
+        """
+        import gc
+        for obj in gc.get_objects():
+            if obj.__class__.__name__ == "APIServerAdapter" and hasattr(obj, "_create_agent"):
+                return obj._create_agent(ephemeral_system_prompt=system_prompt)
+        raise RuntimeError("api_server adapter not found for company workflow agent creation")
+
+'''
+    s = s.replace(company_method_marker, company_method + company_method_marker, 1)
+    patched = True
+else:
+    print('Pinto adapter company workflow method already applied')
+
+extra_config_marker = '        self._persona_configs = extra.get("pintoAgents") if isinstance(extra.get("pintoAgents"), dict) else {}\n'
+if 'self._extra_config = extra\n' not in s:
+    if extra_config_marker not in s:
+        raise SystemExit('Expected persona configs init marker not found for extra_config save')
+    s = s.replace(extra_config_marker, extra_config_marker + '        self._extra_config = extra if isinstance(extra, dict) else {}\n', 1)
+    patched = True
+else:
+    print('Pinto adapter extra_config reference already saved')
+
 p.write_text(s, encoding='utf-8')
 print('Patched Pinto adapter for Hermes 0.16 compatibility' if patched else 'Pinto adapter already patched')
