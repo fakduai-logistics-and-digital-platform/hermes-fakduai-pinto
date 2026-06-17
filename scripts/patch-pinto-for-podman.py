@@ -759,53 +759,106 @@ activity_new = '''            handoff = task_text
             steps = []
             personas = getattr(self, "_persona_configs", {}) or {}
             workflow_id = f"pinto-{chat_id}-{uuid.uuid4().hex[:8]}"
-            for key in chain:
-                persona_cfg = personas.get(key) if isinstance(personas, dict) else None
-                persona_cfg = persona_cfg if isinstance(persona_cfg, dict) else {}
+
+            pm_key = chain[0]
+            worker_chain = [key for key in chain[1:] if key]
+            pm_prompt = self._bot_channel_prompt({"persona": pm_key}) or f"You are {pm_key}."
+            await self._publish_company_activity({
+                "type": "role_started",
+                "workflowId": workflow_id,
+                "from": "pinto",
+                "to": pm_key,
+                "agent": pm_key,
+                "status": "working",
+                "task": task_text,
+                "summary": f"{pm_key} started planning and dispatch",
+            })
+            pm_message = (
+                f"User request for proton company workflow:\\n{task_text}\\n\\n"
+                f"You are '{pm_key}'. Break this into role-specific tasks for these agents: {', '.join(worker_chain)}.\\n"
+                "Return concise Thai planning plus a JSON object at the end in this exact shape:\\n"
+                '{"tasks":[{"agent":"designer","task":"..."}],"notes":"..."}\\n'
+                "Only include available agents. Each task must be different and fit that role."
+            )
+            pm_reply = await self._run_persona_turn(pm_prompt, pm_message)
+            steps.append({"persona": pm_key, "output": pm_reply})
+            await self._publish_company_activity({
+                "type": "role_completed",
+                "workflowId": workflow_id,
+                "from": pm_key,
+                "to": "team",
+                "agent": pm_key,
+                "status": "idle",
+                "task": task_text,
+                "summary": pm_reply[:240],
+            })
+
+            dispatch = self._extract_pm_tasks(pm_reply, worker_chain)
+            worker_outputs = []
+            for idx, key in enumerate(worker_chain, start=1):
+                task_for_role = dispatch.get(key) or f"Build on PM plan for your {key} role."
                 prompt = self._bot_channel_prompt({"persona": key}) or f"You are {key}."
                 await self._publish_company_activity({
-                    "type": "role_started",
+                    "type": "task_dispatched",
                     "workflowId": workflow_id,
-                    "from": "pinto",
+                    "from": pm_key if idx == 1 else worker_chain[idx-2],
                     "to": key,
                     "agent": key,
                     "status": "working",
-                    "task": task_text,
-                    "summary": f"{key} started step {len(steps)+1}/{len(chain)}",
+                    "task": task_for_role,
+                    "summary": f"{pm_key} assigned {key}: {task_for_role[:180]}",
                 })
                 prior_outputs = "\\n\\n".join(
-                    f"[{step['persona']}]\\n{step['output']}" for step in steps[-3:]
+                    f"[{item['persona']}]\\n{item['output']}" for item in worker_outputs[-3:]
                 )
-                if steps:
-                    user_message = (
-                        f"Original user request (context only, do not restart from scratch):\\n{task_text}\\n\\n"
-                        f"Previous role handoff you must build on:\\n{handoff}\\n\\n"
-                        f"Recent prior outputs:\\n{prior_outputs}\\n\\n"
-                        f"Your role is '{key}'. Add only your role-specific contribution, decisions, risks, and handoff for the next role. Do not repeat the same plan unless needed."
-                    )
-                else:
-                    user_message = (
-                        f"User request for proton company workflow:\\n{task_text}\\n\\n"
-                        f"Your role is '{key}'. Produce the first role-specific output and a clear handoff for the next role."
-                    )
+                peer_context = prior_outputs or pm_reply
+                user_message = (
+                    f"Original user request (context only):\\n{task_text}\\n\\n"
+                    f"PM plan and dispatch:\\n{pm_reply}\\n\\n"
+                    f"Your assigned task from PM:\\n{task_for_role}\\n\\n"
+                    f"Recent peer outputs you may coordinate with:\\n{peer_context}\\n\\n"
+                    f"Your role is '{key}'. Do only your assigned role-specific work. Talk to/hand off to the next relevant teammate when useful. Do not redo PM planning."
+                )
                 reply = await self._run_persona_turn(prompt, user_message)
-                steps.append({"persona": key, "output": reply})
+                worker_outputs.append({"persona": key, "output": reply, "task": task_for_role})
+                steps.append({"persona": key, "output": reply, "task": task_for_role})
+                next_to = worker_chain[idx] if idx < len(worker_chain) else "techlead"
                 await self._publish_company_activity({
-                    "type": "role_completed",
+                    "type": "peer_handoff",
                     "workflowId": workflow_id,
                     "from": key,
-                    "to": chain[chain.index(key)+1] if chain.index(key)+1 < len(chain) else "pinto",
+                    "to": next_to,
                     "agent": key,
                     "status": "idle",
-                    "task": task_text,
+                    "task": task_for_role,
                     "summary": reply[:240],
                 })
-                handoff = reply
 
+            reviewer_key = "techlead" if "techlead" in worker_chain else worker_chain[-1] if worker_chain else pm_key
+            final_prompt = self._bot_channel_prompt({"persona": reviewer_key}) or f"You are {reviewer_key}."
+            combined_outputs = "\\n\\n".join(
+                f"[{step.get('persona')}] task={step.get('task','')}\\n{step.get('output','')}" for step in steps
+            )
+            await self._publish_company_activity({
+                "type": "review_started",
+                "workflowId": workflow_id,
+                "from": "team",
+                "to": reviewer_key,
+                "agent": reviewer_key,
+                "status": "working",
+                "task": task_text,
+                "summary": f"{reviewer_key} started final review",
+            })
+            final_message = (
+                f"Original user request:\\n{task_text}\\n\\n"
+                f"Team outputs:\\n{combined_outputs}\\n\\n"
+                "Create the final answer to the Pinto user. Be practical, consolidated, and avoid repeating internal chatter."
+            )
+            handoff = await self._run_persona_turn(final_prompt, final_message)
             await self._publish_company_activity({
                 "type": "workflow_completed",
                 "workflowId": workflow_id,
-                "from": chain[-1] if chain else "hermes",
+                "from": reviewer_key,
                 "to": "pinto",
                 "status": "done",
                 "task": task_text,
@@ -813,6 +866,7 @@ activity_new = '''            handoff = task_text
             })
             await self.send(chat_id, handoff)
 '''
+
 if activity_old in s:
     s = s.replace(activity_old, activity_new, 1)
     patched = True
@@ -820,6 +874,55 @@ elif 'role_started' in s and '_publish_company_activity' in s:
     print('Pinto adapter company dashboard activity loop already applied')
 else:
     print('Pinto adapter company activity loop patch skipped (shape changed)')
+
+extract_marker = '    async def _run_persona_turn(self, system_prompt: str, user_message: str) -> str:\n'
+extract_method = '''    def _extract_pm_tasks(self, text: str, allowed_agents: list) -> dict:
+        """Extract PM JSON dispatch tasks from model output."""
+        allowed = {str(agent).strip().lower(): str(agent).strip() for agent in (allowed_agents or []) if str(agent).strip()}
+        if not text or not allowed:
+            return {}
+        candidates = []
+        raw = str(text)
+        try:
+            start = raw.find("{")
+            end = raw.rfind("}")
+            if start >= 0 and end > start:
+                candidates.append(raw[start:end + 1])
+            candidates.append(raw)
+            for candidate in candidates:
+                data = json.loads(candidate)
+                tasks = data.get("tasks") if isinstance(data, dict) else None
+                if not isinstance(tasks, list):
+                    continue
+                out = {}
+                for item in tasks:
+                    if not isinstance(item, dict):
+                        continue
+                    agent = str(item.get("agent") or item.get("to") or "").strip().lower()
+                    task = str(item.get("task") or item.get("summary") or item.get("instruction") or "").strip()
+                    if agent in allowed and task:
+                        out[allowed[agent]] = task
+                if out:
+                    return out
+        except Exception:
+            logger.debug("PM dispatch JSON parse failed", exc_info=True)
+        out = {}
+        lower = raw.lower()
+        for key, original in allowed.items():
+            idx = lower.find(key)
+            if idx >= 0:
+                snippet = raw[idx:idx + 500].strip()
+                out[original] = snippet
+        return out
+
+'''
+if 'def _extract_pm_tasks(' not in s:
+    if extract_marker not in s:
+        raise SystemExit('Expected _run_persona_turn marker for PM task extractor not found')
+    s = s.replace(extract_marker, extract_method + extract_marker, 1)
+    patched = True
+else:
+    print('Pinto adapter PM task extractor already applied')
 
 publish_marker = '    async def _run_persona_turn(self, system_prompt: str, user_message: str) -> str:\n'
 publish_method = '''    async def _publish_company_activity(self, event: dict) -> None:
@@ -845,6 +948,124 @@ if 'async def _publish_company_activity(' not in s:
     patched = True
 else:
     print('Pinto adapter company dashboard activity publisher already applied')
+
+
+# Force-upgrade company workflow method to PM dispatch orchestration, even when
+# older dashboard-activity workflow code is already present in the adapter.
+pm_dispatch_marker = '    def _bot_channel_prompt(self, bot_config: dict) -> Optional[str]:\n'
+pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, bot_id: str, bot_config: dict, task_text: str) -> None:
+        # Run PM-led company orchestration.
+        try:
+            await self.send_typing(chat_id)
+            chain = bot_config.get("companyWorkflow")
+            if not isinstance(chain, list) or not chain:
+                extra = getattr(self, "_extra_config", None) or {}
+                workflows = extra.get("companyWorkflows") if isinstance(extra, dict) else None
+                default_chain = workflows.get("default") if isinstance(workflows, dict) else None
+                chain = default_chain if isinstance(default_chain, list) and default_chain else list(getattr(self, "_persona_configs", {}) or {})
+            chain = [str(key) for key in chain if key]
+            if not chain:
+                await self.send(chat_id, "⚠️ ยังไม่ได้ตั้งค่า company workflow (pintoAgents ว่าง)")
+                return
+
+            steps = []
+            workflow_id = f"pinto-{chat_id}-{uuid.uuid4().hex[:8]}"
+            pm_key = chain[0]
+            worker_chain = [key for key in chain[1:] if key]
+
+            pm_prompt = self._bot_channel_prompt({"persona": pm_key}) or f"You are {pm_key}."
+            await self._publish_company_activity({"type":"role_started","workflowId":workflow_id,"from":"pinto","to":pm_key,"agent":pm_key,"status":"working","task":task_text,"summary":f"{pm_key} started planning and dispatch"})
+            pm_message = (
+                f"User request for proton company workflow:\\n{task_text}\\n\\n"
+                f"You are '{pm_key}'. Break this into role-specific tasks for these agents: {', '.join(worker_chain)}.\n"
+                "Return concise Thai planning plus a JSON object at the end in this exact shape:\\n"
+                '{"tasks":[{"agent":"designer","task":"..."}],"notes":"..."}\n'
+                "Only include available agents. Each task must be different and fit that role."
+            )
+            pm_reply = await self._run_persona_turn(pm_prompt, pm_message)
+            steps.append({"persona": pm_key, "output": pm_reply, "task": "plan and dispatch"})
+            await self._publish_company_activity({"type":"role_completed","workflowId":workflow_id,"from":pm_key,"to":"team","agent":pm_key,"status":"idle","task":task_text,"summary":pm_reply[:240]})
+
+            dispatch = self._extract_pm_tasks(pm_reply, worker_chain)
+            worker_outputs = []
+            for idx, key in enumerate(worker_chain, start=1):
+                task_for_role = dispatch.get(key) or f"Build on PM plan for your {key} role."
+                prompt = self._bot_channel_prompt({"persona": key}) or f"You are {key}."
+                from_agent = pm_key if idx == 1 else worker_chain[idx - 2]
+                await self._publish_company_activity({"type":"task_dispatched","workflowId":workflow_id,"from":from_agent,"to":key,"agent":key,"status":"working","task":task_for_role,"summary":f"{from_agent} -> {key}: {task_for_role[:180]}"})
+                prior_outputs = "\\n\\n".join(f"[{item['persona']}]\\n{item['output']}" for item in worker_outputs[-3:])
+                peer_context = prior_outputs or pm_reply
+                user_message = (
+                    f"Original user request (context only):\\n{task_text}\\n\\n"
+                    f"PM plan and dispatch:\\n{pm_reply}\\n\\n"
+                    f"Your assigned task from PM:\\n{task_for_role}\\n\\n"
+                    f"Recent peer outputs you may coordinate with:\\n{peer_context}\\n\\n"
+                    f"Your role is '{key}'. Do only your assigned role-specific work. Talk to/hand off to the next relevant teammate when useful. Do not redo PM planning."
+                )
+                reply = await self._run_persona_turn(prompt, user_message)
+                worker_outputs.append({"persona": key, "output": reply, "task": task_for_role})
+                steps.append({"persona": key, "output": reply, "task": task_for_role})
+                next_to = worker_chain[idx] if idx < len(worker_chain) else "techlead"
+                await self._publish_company_activity({"type":"peer_handoff","workflowId":workflow_id,"from":key,"to":next_to,"agent":key,"status":"idle","task":task_for_role,"summary":reply[:240]})
+
+            reviewer_key = "techlead" if "techlead" in worker_chain else worker_chain[-1] if worker_chain else pm_key
+            final_prompt = self._bot_channel_prompt({"persona": reviewer_key}) or f"You are {reviewer_key}."
+            combined_outputs = "\\n\\n".join(f"[{step.get('persona')}] task={step.get('task','')}\\n{step.get('output','')}" for step in steps)
+            await self._publish_company_activity({"type":"review_started","workflowId":workflow_id,"from":"team","to":reviewer_key,"agent":reviewer_key,"status":"working","task":task_text,"summary":f"{reviewer_key} started final review"})
+            final_message = f"Original user request:\\n{task_text}\\n\\nTeam outputs:\\n{combined_outputs}\\n\\nCreate the final answer to the Pinto user. Be practical, consolidated, and avoid repeating internal chatter."
+            handoff = await self._run_persona_turn(final_prompt, final_message)
+            await self._publish_company_activity({"type":"workflow_completed","workflowId":workflow_id,"from":reviewer_key,"to":"pinto","status":"done","task":task_text,"summary":handoff[:240]})
+            await self.send(chat_id, handoff)
+        except Exception:
+            logger.exception("Pinto company workflow failed chat_id=%s bot_id=%s", chat_id, bot_id)
+            try:
+                await self.send(chat_id, "✖️ company workflow ล้มเหลว ดู log ฝั่ง Hermes Gateway")
+            except Exception:
+                pass
+
+    def _extract_pm_tasks(self, text: str, allowed_agents: list) -> dict:
+        # Extract PM JSON dispatch tasks from model output.
+        allowed = {str(agent).strip().lower(): str(agent).strip() for agent in (allowed_agents or []) if str(agent).strip()}
+        if not text or not allowed:
+            return {}
+        raw = str(text)
+        try:
+            start = raw.find("{")
+            end = raw.rfind("}")
+            candidates = []
+            if start >= 0 and end > start:
+                candidates.append(raw[start:end + 1])
+            candidates.append(raw)
+            for candidate in candidates:
+                data = json.loads(candidate)
+                tasks = data.get("tasks") if isinstance(data, dict) else None
+                if not isinstance(tasks, list):
+                    continue
+                out = {}
+                for item in tasks:
+                    if not isinstance(item, dict):
+                        continue
+                    agent = str(item.get("agent") or item.get("to") or "").strip().lower()
+                    task = str(item.get("task") or item.get("summary") or item.get("instruction") or "").strip()
+                    if agent in allowed and task:
+                        out[allowed[agent]] = task
+                if out:
+                    return out
+        except Exception:
+            logger.debug("PM dispatch JSON parse failed", exc_info=True)
+        return {}
+
+'''
+pattern = r'    async def _run_company_workflow\(self, chat_id: str, bot_id: str, bot_config: dict, task_text: str\) -> None:\n.*?(?=    async def _publish_company_activity\(|    async def _run_persona_turn\(|    def _bot_channel_prompt\()'
+new_s, count = re.subn(pattern, pm_dispatch_method, s, count=1, flags=re.S)
+if count:
+    s = new_s
+    patched = True
+elif pm_dispatch_marker in s:
+    s = s.replace(pm_dispatch_marker, pm_dispatch_method + pm_dispatch_marker, 1)
+    patched = True
+else:
+    raise SystemExit('Expected company workflow insertion marker not found')
 
 extra_config_marker = '        self._persona_configs = extra.get("pintoAgents") if isinstance(extra.get("pintoAgents"), dict) else {}\n'
 if 'self._extra_config = extra\n' not in s:
@@ -880,6 +1101,20 @@ primary_new = '''    def _bot_config(self, bot_id: str) -> Optional[dict]:
             return cfg
         return None
 '''
+
+# Repair any accidental literal newlines inside generated adapter f-strings.
+s = s.replace('f"User request for proton company workflow:\n{task_text}\n\n"', 'f"User request for proton company workflow:\\n{task_text}\\n\\n"')
+s = s.replace('f"You are \'{pm_key}\'. Break this into role-specific tasks for these agents: {\', \'.join(worker_chain)}.\n"', 'f"You are \'{pm_key}\'. Break this into role-specific tasks for these agents: {\', \'.join(worker_chain)}.\\n"')
+s = s.replace('"Return concise Thai planning plus a JSON object at the end in this exact shape:\n"', '"Return concise Thai planning plus a JSON object at the end in this exact shape:\\n"')
+s = s.replace('\'{"tasks":[{"agent":"designer","task":"..."}],"notes":"..."}\n\'', '\'{"tasks":[{"agent":"designer","task":"..."}],"notes":"..."}\\n\'')
+s = s.replace('prior_outputs = "\n\n".join(f"[{item[\'persona\']}]\n{item[\'output\']}"', 'prior_outputs = "\\n\\n".join(f"[{item[\'persona\']}]\\n{item[\'output\']}"')
+s = s.replace('f"Original user request (context only):\n{task_text}\n\n"', 'f"Original user request (context only):\\n{task_text}\\n\\n"')
+s = s.replace('f"PM plan and dispatch:\n{pm_reply}\n\n"', 'f"PM plan and dispatch:\\n{pm_reply}\\n\\n"')
+s = s.replace('f"Your assigned task from PM:\n{task_for_role}\n\n"', 'f"Your assigned task from PM:\\n{task_for_role}\\n\\n"')
+s = s.replace('f"Recent peer outputs you may coordinate with:\n{peer_context}\n\n"', 'f"Recent peer outputs you may coordinate with:\\n{peer_context}\\n\\n"')
+s = s.replace('combined_outputs = "\n\n".join(f"[{step.get(\'persona\')}] task={step.get(\'task\',\'\')}\n{step.get(\'output\',\'\')}"', 'combined_outputs = "\\n\\n".join(f"[{step.get(\'persona\')}] task={step.get(\'task\',\'\')}\\n{step.get(\'output\',\'\')}"')
+s = s.replace('final_message = f"Original user request:\n{task_text}\n\nTeam outputs:\n{combined_outputs}\n\nCreate', 'final_message = f"Original user request:\\n{task_text}\\n\\nTeam outputs:\\n{combined_outputs}\\n\\nCreate')
+
 if primary_old in s:
     s = s.replace(primary_old, primary_new)
     patched = True
