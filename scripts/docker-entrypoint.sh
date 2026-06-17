@@ -58,7 +58,10 @@ for root in Path('/usr/local/lib/python3.11/site-packages').rglob('assets'):
         if old in text and new not in text:
             text = text.replace(old, new)
         old = 'l.jsx(ot,{id:`field-${M.key}`,type:M.is_password?"password":"text",placeholder:M.is_set?M.redacted_value||"•••••• (set — leave blank to keep)":M.key,value:f[M.key]??"",onChange:R=>g(P=>({...P,[M.key]:R.target.value}))})'
-        new = 'u.id==="pinto"&&(M.key==="PINTO_WEBHOOK_URL"||M.key==="PINTO_WEBHOOK_SECRET")?l.jsx("div",{className:"select-text break-all border border-border bg-background/40 px-3 py-2 font-mono text-xs text-foreground",children:M.redacted_value||"(not generated yet)"}):l.jsx(ot,{id:`field-${M.key}`,type:M.is_password?"password":"text",placeholder:M.is_set?M.redacted_value||"•••••• (set — leave blank to keep)":M.key,value:f[M.key]??"",onChange:R=>g(P=>({...P,[M.key]:R.target.value}))})'
+        new = '(u.id==="pinto"||u.id.startsWith("pinto:"))&&(M.key==="PINTO_WEBHOOK_URL"||M.key==="PINTO_WEBHOOK_SECRET")?l.jsx("div",{className:"select-text break-all border border-border bg-background/40 px-3 py-2 font-mono text-xs text-foreground",children:M.redacted_value||"(not generated yet)"}):l.jsx(ot,{id:`field-${M.key}`,type:M.is_password?"password":"text",placeholder:M.is_set?M.redacted_value||"•••••• (set — leave blank to keep)":M.key,value:f[M.key]??"",onChange:R=>g(P=>({...P,[M.key]:R.target.value}))})'
+        if old in text and new not in text:
+            text = text.replace(old, new)
+        old = 'u.id==="pinto"&&(M.key==="PINTO_WEBHOOK_URL"||M.key==="PINTO_WEBHOOK_SECRET")?l.jsx("div",{className:"select-text break-all border border-border bg-background/40 px-3 py-2 font-mono text-xs text-foreground",children:M.redacted_value||"(not generated yet)"}):l.jsx(ot,{id:`field-${M.key}`,type:M.is_password?"password":"text",placeholder:M.is_set?M.redacted_value||"•••••• (set — leave blank to keep)":M.key,value:f[M.key]??"",onChange:R=>g(P=>({...P,[M.key]:R.target.value}))})'
         if old in text and new not in text:
             text = text.replace(old, new)
         js.write_text(text, encoding='utf-8')
