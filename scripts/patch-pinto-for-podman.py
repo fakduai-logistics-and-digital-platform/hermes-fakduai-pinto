@@ -654,7 +654,7 @@ if 'async def _run_company_workflow(' not in s:
             for key in chain:
                 persona_cfg = personas.get(key) if isinstance(personas, dict) else None
                 persona_cfg = persona_cfg if isinstance(persona_cfg, dict) else {}
-                prompt = self._bot_channel_prompt({"persona": key}) or f"You are {key}."
+                prompt = self._company_role_prompt(key, self._bot_channel_prompt({"persona": key}) or f"You are {key}.")
                 prior_outputs = "\\n\\n".join(
                     f"[{step['persona']}]\\n{step['output']}" for step in steps[-3:]
                 )
@@ -681,6 +681,82 @@ if 'async def _run_company_workflow(' not in s:
                 await self.send(chat_id, "\u2716\ufe0f company workflow \u0e25\u0e49\u0e21\u0e40\u0e2b\u0e25\u0e27 \u0e14\u0e39 log \u0e1d\u0e31\u0e48\u0e07 Hermes Gateway")
             except Exception:
                 pass
+
+    def _company_role_prompt(self, role_key: str, base_prompt: str) -> str:
+        """Inject vendored company AGENTS.md and SKILL.md guidance into one role prompt."""
+        try:
+            import os
+            from pathlib import Path
+            root = Path(os.getenv("COMPANY_SKILLS_DIR", "/root/.hermes/company-skills"))
+            role = str(role_key or "default").strip().lower() or "default"
+            parts = [str(base_prompt or f"You are {role}.")]
+            role_agents = root / "templates" / "workspaces" / role / "AGENTS.md"
+            default_agents = root / "templates" / "workspaces" / "default" / "AGENTS.md"
+            for path in (role_agents, default_agents):
+                if path.exists():
+                    text = path.read_text(encoding="utf-8", errors="ignore")[:16000]
+                    parts.append(f"\n\n--- COMPANY {path.name} ({path}) ---\n{text}")
+            skill_map = {
+                "pm": [
+                    "skills/stop-slop/SKILL.md",
+                    "skills/9arm/skills/productivity/management-talk/SKILL.md",
+                    "skills/9arm/skills/productivity/qwenchance/SKILL.md",
+                    "skills/karpathy-guidelines/SKILL.md",
+                ],
+                "designer": [
+                    "skills/taste-skill/skills/taste-skill/SKILL.md",
+                    "skills/karpathy-guidelines/SKILL.md",
+                ],
+                "frontend": [
+                    "skills/taste-skill/skills/taste-skill/SKILL.md",
+                    "skills/karpathy-guidelines/SKILL.md",
+                ],
+                "backend": [
+                    "skills/karpathy-guidelines/SKILL.md",
+                    "skills/mattpocock/engineering/tdd/SKILL.md",
+                    "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md",
+                    "skills/mattpocock/engineering/domain-modeling/SKILL.md",
+                    "skills/9arm/skills/engineering/debug-mantra/SKILL.md",
+                    "skills/9arm/skills/engineering/scrutinize/SKILL.md",
+                ],
+                "qa": [
+                    "skills/karpathy-guidelines/SKILL.md",
+                    "skills/mattpocock/deprecated/qa/SKILL.md",
+                    "skills/mattpocock/in-progress/review/SKILL.md",
+                    "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md",
+                    "skills/mattpocock/engineering/tdd/SKILL.md",
+                    "skills/mattpocock/engineering/triage/SKILL.md",
+                    "skills/9arm/skills/engineering/debug-mantra/SKILL.md",
+                    "skills/9arm/skills/engineering/scrutinize/SKILL.md",
+                ],
+                "techlead": [
+                    "skills/karpathy-guidelines/SKILL.md",
+                    "skills/stop-slop/SKILL.md",
+                    "skills/mattpocock/engineering/codebase-design/SKILL.md",
+                    "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md",
+                    "skills/9arm/skills/engineering/scrutinize/SKILL.md",
+                    "skills/9arm/skills/engineering/post-mortem/SKILL.md",
+                    "skills/9arm/skills/productivity/management-talk/SKILL.md",
+                ],
+            }
+            rels = skill_map.get(role, ["skills/karpathy-guidelines/SKILL.md"])
+            budget = int(os.getenv("COMPANY_SKILL_PROMPT_BUDGET", "52000"))
+            used = sum(len(p) for p in parts)
+            for rel in rels:
+                path = root / rel
+                if not path.exists():
+                    continue
+                text = path.read_text(encoding="utf-8", errors="ignore")
+                remaining = budget - used
+                if remaining <= 2000:
+                    break
+                text = text[: min(len(text), remaining)]
+                parts.append(f"\n\n--- SKILL {rel} ---\n{text}")
+                used += len(text)
+            parts.append("\n\nFollow the injected AGENTS.md and SKILL.md instructions for this role before doing the task. If they conflict with the user's task, keep safety rules and role scope.")
+            return "".join(parts)
+        except Exception:
+            return str(base_prompt or f"You are {role_key}.")
 
     async def _run_persona_turn(self, system_prompt: str, user_message: str) -> str:
         """Run a single persona turn through the in-process Hermes agent."""
@@ -733,7 +809,7 @@ activity_old = '''            handoff = task_text
             for key in chain:
                 persona_cfg = personas.get(key) if isinstance(personas, dict) else None
                 persona_cfg = persona_cfg if isinstance(persona_cfg, dict) else {}
-                prompt = self._bot_channel_prompt({"persona": key}) or f"You are {key}."
+                prompt = self._company_role_prompt(key, self._bot_channel_prompt({"persona": key}) or f"You are {key}.")
                 prior_outputs = "\\n\\n".join(
                     f"[{step['persona']}]\\n{step['output']}" for step in steps[-3:]
                 )
@@ -762,7 +838,7 @@ activity_new = '''            handoff = task_text
 
             pm_key = chain[0]
             worker_chain = [key for key in chain[1:] if key]
-            pm_prompt = self._bot_channel_prompt({"persona": pm_key}) or f"You are {pm_key}."
+            pm_prompt = self._company_role_prompt(pm_key, self._bot_channel_prompt({"persona": pm_key}) or f"You are {pm_key}.")
             await self._publish_company_activity({
                 "type": "role_started",
                 "workflowId": workflow_id,
@@ -797,7 +873,7 @@ activity_new = '''            handoff = task_text
             worker_outputs = []
             for idx, key in enumerate(worker_chain, start=1):
                 task_for_role = dispatch.get(key) or f"Build on PM plan for your {key} role."
-                prompt = self._bot_channel_prompt({"persona": key}) or f"You are {key}."
+                prompt = self._company_role_prompt(key, self._bot_channel_prompt({"persona": key}) or f"You are {key}.")
                 await self._publish_company_activity({
                     "type": "task_dispatched",
                     "workflowId": workflow_id,
@@ -835,7 +911,7 @@ activity_new = '''            handoff = task_text
                 })
 
             reviewer_key = "techlead" if "techlead" in worker_chain else worker_chain[-1] if worker_chain else pm_key
-            final_prompt = self._bot_channel_prompt({"persona": reviewer_key}) or f"You are {reviewer_key}."
+            final_prompt = self._company_role_prompt(reviewer_key, self._bot_channel_prompt({"persona": reviewer_key}) or f"You are {reviewer_key}.")
             combined_outputs = "\\n\\n".join(
                 f"[{step.get('persona')}] task={step.get('task','')}\\n{step.get('output','')}" for step in steps
             )
@@ -1021,7 +1097,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             pm_key = chain[0]
             worker_chain = [key for key in chain[1:] if key]
 
-            pm_prompt = self._bot_channel_prompt({"persona": pm_key}) or f"You are {pm_key}."
+            pm_prompt = self._company_role_prompt(pm_key, self._bot_channel_prompt({"persona": pm_key}) or f"You are {pm_key}.")
             await self._publish_company_activity({"type":"role_started","workflowId":workflow_id,"from":"pinto","to":pm_key,"agent":pm_key,"status":"working","task":task_text,"summary":f"{pm_key} started planning and dispatch"})
             await self.send(chat_id, f"▶️ {pm_key} เริ่มวางแผนและแบ่งงาน")
             pm_message = (
@@ -1043,7 +1119,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             worker_outputs = []
             for idx, key in enumerate(worker_chain, start=1):
                 task_for_role = dispatch.get(key) or f"Build on PM plan for your {key} role."
-                prompt = self._bot_channel_prompt({"persona": key}) or f"You are {key}."
+                prompt = self._company_role_prompt(key, self._bot_channel_prompt({"persona": key}) or f"You are {key}.")
                 from_agent = pm_key if idx == 1 else worker_chain[idx - 2]
                 await self._publish_company_activity({"type":"task_dispatched","workflowId":workflow_id,"from":from_agent,"to":key,"agent":key,"status":"working","task":task_for_role,"summary":f"{from_agent} -> {key}: {task_for_role[:180]}"})
                 await self.send(chat_id, f"▶️ {key} เริ่มทำงาน")
@@ -1085,7 +1161,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             if followups:
                 await self.send(chat_id, f"⚠️ PM เจอ follow-up {len(followups)} งาน กำลังส่งกลับทีมที่เกี่ยวข้อง")
             for key, task_for_role in followups.items():
-                prompt = self._bot_channel_prompt({"persona": key}) or f"You are {key}."
+                prompt = self._company_role_prompt(key, self._bot_channel_prompt({"persona": key}) or f"You are {key}.")
                 await self._publish_company_activity({"type":"followup_dispatched","workflowId":workflow_id,"from":pm_key,"to":key,"agent":key,"status":"working","task":task_for_role,"summary":f"{pm_key} follow-up -> {key}: {task_for_role[:180]}"})
                 await self.send(chat_id, f"🔁 {key} กลับไปแก้ follow-up")
                 follow_message = (
@@ -1102,7 +1178,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 asyncio.create_task(self._restore_company_agent_idle(workflow_id, key, task_for_role, 12))
 
             reviewer_key = "techlead" if "techlead" in worker_chain else worker_chain[-1] if worker_chain else pm_key
-            final_prompt = self._bot_channel_prompt({"persona": reviewer_key}) or f"You are {reviewer_key}."
+            final_prompt = self._company_role_prompt(reviewer_key, self._bot_channel_prompt({"persona": reviewer_key}) or f"You are {reviewer_key}.")
             combined_outputs = "\\n\\n".join(f"[{step.get('persona')}] task={step.get('task','')}\\n{step.get('output','')}" for step in steps)
             await self._publish_company_activity({"type":"review_started","workflowId":workflow_id,"from":"team","to":reviewer_key,"agent":reviewer_key,"status":"working","task":task_text,"summary":f"{reviewer_key} started final review"})
             await self.send(chat_id, f"▶️ {reviewer_key} เริ่ม final review")
@@ -1180,6 +1256,52 @@ elif pm_dispatch_marker in s:
     patched = True
 else:
     raise SystemExit('Expected company workflow insertion marker not found')
+
+company_role_prompt_method = '''    def _company_role_prompt(self, role_key: str, base_prompt: str) -> str:
+        """Inject vendored company AGENTS.md and SKILL.md guidance into one role prompt."""
+        try:
+            import os
+            from pathlib import Path
+            root = Path(os.getenv("COMPANY_SKILLS_DIR", "/root/.hermes/company-skills"))
+            role = str(role_key or "default").strip().lower() or "default"
+            parts = [str(base_prompt or f"You are {role}.")]
+            for path in (root / "templates" / "workspaces" / role / "AGENTS.md", root / "templates" / "workspaces" / "default" / "AGENTS.md"):
+                if path.exists():
+                    parts.append(f"\\n\\n--- COMPANY AGENTS ({path}) ---\\n{path.read_text(encoding='utf-8', errors='ignore')[:16000]}")
+            skill_map = {
+                "pm": ["skills/stop-slop/SKILL.md", "skills/9arm/skills/productivity/management-talk/SKILL.md", "skills/9arm/skills/productivity/qwenchance/SKILL.md", "skills/karpathy-guidelines/SKILL.md"],
+                "designer": ["skills/taste-skill/skills/taste-skill/SKILL.md", "skills/karpathy-guidelines/SKILL.md"],
+                "frontend": ["skills/taste-skill/skills/taste-skill/SKILL.md", "skills/karpathy-guidelines/SKILL.md"],
+                "backend": ["skills/karpathy-guidelines/SKILL.md", "skills/mattpocock/engineering/tdd/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/mattpocock/engineering/domain-modeling/SKILL.md", "skills/9arm/skills/engineering/debug-mantra/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md"],
+                "qa": ["skills/karpathy-guidelines/SKILL.md", "skills/mattpocock/deprecated/qa/SKILL.md", "skills/mattpocock/in-progress/review/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/mattpocock/engineering/tdd/SKILL.md", "skills/mattpocock/engineering/triage/SKILL.md", "skills/9arm/skills/engineering/debug-mantra/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md"],
+                "techlead": ["skills/karpathy-guidelines/SKILL.md", "skills/stop-slop/SKILL.md", "skills/mattpocock/engineering/codebase-design/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md", "skills/9arm/skills/engineering/post-mortem/SKILL.md", "skills/9arm/skills/productivity/management-talk/SKILL.md"],
+            }
+            budget = int(os.getenv("COMPANY_SKILL_PROMPT_BUDGET", "52000"))
+            used = sum(len(x) for x in parts)
+            for rel in skill_map.get(role, ["skills/karpathy-guidelines/SKILL.md"]):
+                path = root / rel
+                if not path.exists():
+                    continue
+                remaining = budget - used
+                if remaining <= 2000:
+                    break
+                text = path.read_text(encoding="utf-8", errors="ignore")[:remaining]
+                parts.append(f"\\n\\n--- SKILL {rel} ---\\n{text}")
+                used += len(text)
+            parts.append("\\n\\nFollow the injected AGENTS.md and SKILL.md instructions for this role before doing the task. If they conflict with the user's task, keep safety rules and role scope.")
+            return "".join(parts)
+        except Exception:
+            return str(base_prompt or f"You are {role_key}.")
+
+'''
+if 'def _company_role_prompt(self, role_key: str, base_prompt: str)' not in s:
+    marker = '    async def _run_persona_turn(self, system_prompt: str, user_message: str) -> str:\n'
+    if marker not in s:
+        raise SystemExit('Expected _run_persona_turn marker for company role prompt helper')
+    s = s.replace(marker, company_role_prompt_method + marker, 1)
+    patched = True
+else:
+    print('Pinto adapter company role prompt helper already applied')
 
 extra_config_marker = '        self._persona_configs = extra.get("pintoAgents") if isinstance(extra.get("pintoAgents"), dict) else {}\n'
 if 'self._extra_config = extra\n' not in s:
