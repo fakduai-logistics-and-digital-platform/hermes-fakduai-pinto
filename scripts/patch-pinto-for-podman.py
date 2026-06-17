@@ -1134,8 +1134,9 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 prompt = self._company_role_prompt(key, self._bot_channel_prompt({"persona": key}) or f"You are {key}.")
                 from_agent = pm_key if idx == 1 else worker_chain[idx - 2]
                 role_todos = self._build_company_role_todos(key, task_for_role)
-                await self._publish_company_activity({"type":"task_dispatched","workflowId":workflow_id,"from":from_agent,"to":key,"agent":key,"status":"working","task":task_for_role,"summary":f"{from_agent} -> {key}: {task_for_role[:180]}","todos":role_todos,"todoIndex":1,"todoTotal":len(role_todos)})
-                await self._publish_company_activity({"type":"todo_started","workflowId":workflow_id,"from":key,"to":key,"agent":key,"status":"working","task":task_for_role,"summary":f"{key} todo 1/{len(role_todos)}: {role_todos[0] if role_todos else 'start'}","todos":role_todos,"todoIndex":1,"todoTotal":len(role_todos)})
+                role_location = self._company_role_location(key)
+                await self._publish_company_activity({"type":"task_dispatched","workflowId":workflow_id,"from":from_agent,"to":key,"agent":key,"status":"working","location":role_location,"task":task_for_role,"summary":f"{from_agent} -> {key}: {task_for_role[:180]}","todos":role_todos,"todoIndex":1,"todoTotal":len(role_todos)})
+                await self._publish_company_activity({"type":"todo_started","workflowId":workflow_id,"from":key,"to":key,"agent":key,"status":"working","location":role_location,"task":task_for_role,"summary":f"{key} todo 1/{len(role_todos)}: {role_todos[0] if role_todos else 'start'}","todos":role_todos,"todoIndex":1,"todoTotal":len(role_todos)})
                 await self.send(chat_id, f"▶️ {key} เริ่มทำงาน")
                 prior_outputs = "\\n\\n".join(f"[{item['persona']}]\\n{item['output']}" for item in worker_outputs[-3:])
                 peer_context = prior_outputs or pm_reply
@@ -1183,8 +1184,9 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             for key, task_for_role in followups.items():
                 prompt = self._company_role_prompt(key, self._bot_channel_prompt({"persona": key}) or f"You are {key}.")
                 role_todos = self._build_company_role_todos(key, task_for_role)
-                await self._publish_company_activity({"type":"followup_dispatched","workflowId":workflow_id,"from":pm_key,"to":key,"agent":key,"status":"working","task":task_for_role,"summary":f"{pm_key} follow-up -> {key}: {task_for_role[:180]}","todos":role_todos,"todoIndex":1,"todoTotal":len(role_todos)})
-                await self._publish_company_activity({"type":"todo_started","workflowId":workflow_id,"from":key,"to":key,"agent":key,"status":"working","task":task_for_role,"summary":f"{key} follow-up todo 1/{len(role_todos)}: {role_todos[0] if role_todos else 'start'}","todos":role_todos,"todoIndex":1,"todoTotal":len(role_todos)})
+                role_location = self._company_role_location(key)
+                await self._publish_company_activity({"type":"followup_dispatched","workflowId":workflow_id,"from":pm_key,"to":key,"agent":key,"status":"working","location":role_location,"task":task_for_role,"summary":f"{pm_key} follow-up -> {key}: {task_for_role[:180]}","todos":role_todos,"todoIndex":1,"todoTotal":len(role_todos)})
+                await self._publish_company_activity({"type":"todo_started","workflowId":workflow_id,"from":key,"to":key,"agent":key,"status":"working","location":role_location,"task":task_for_role,"summary":f"{key} follow-up todo 1/{len(role_todos)}: {role_todos[0] if role_todos else 'start'}","todos":role_todos,"todoIndex":1,"todoTotal":len(role_todos)})
                 await self.send(chat_id, f"🔁 {key} กลับไปแก้ follow-up")
                 follow_message = (
                     f"Original user request:\\n{task_text}\\n\\n"
@@ -1219,6 +1221,17 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 await self.send(chat_id, "✖️ company workflow ล้มเหลว ดู log ฝั่ง Hermes Gateway")
             except Exception:
                 pass
+
+    def _company_role_location(self, role_key: str) -> str:
+        role = str(role_key or "").strip().lower()
+        return {
+            "frontend": "dev-room",
+            "backend": "dev-room",
+            "qa": "qa-room",
+            "designer": "desk",
+            "techlead": "desk",
+            "pm": "desk",
+        }.get(role, "desk")
 
     def _build_company_role_todos(self, role_key: str, task_text: str) -> list:
         role = str(role_key or "agent").strip().lower()
