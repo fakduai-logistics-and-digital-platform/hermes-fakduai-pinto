@@ -1104,7 +1104,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             pm_message = (
                 f"User request for proton company workflow:\\n{task_text}\\n\\n"
                 f"You are '{pm_key}'. Break this into role-specific tasks for these agents: {', '.join(worker_chain)}.\n"
-                "If the user asks to run, preview, host, deploy, open, or show the product, route that request directly to frontend and/or backend dev tasks. Do not make the user run it themselves unless credentials or environment are missing. "
+                "If the user asks to run, preview, host, deploy, open, or show the product, route that request directly to frontend and/or backend dev tasks. Do not make the user run it themselves unless credentials or environment are missing. Prefer Cloudflare/Wrangler when authenticated; otherwise use localhost.run via ssh -R 80:localhost:3000 nokey@localhost.run if SSH and a local preview server are available. "
                 "Return concise Thai planning plus a JSON object at the end in this exact shape:\\n"
                 '{"tasks":[{"agent":"designer","task":"..."}],"notes":"..."}\n'
                 "Only include available agents. Each task must be different and fit that role."
@@ -1208,7 +1208,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             if not text:
                 return
             import re
-            urls = re.findall(r"https://[^\s<>)\]\\\"']+(?:workers\.dev|pages\.dev|trycloudflare\.com)[^\s<>)\]\\\"']*", str(text))
+            urls = re.findall(r"https://[^\s<>)\]\\\"']+(?:workers\.dev|pages\.dev|trycloudflare\.com|localhost\.run)[^\s<>)\]\\\"']*", str(text))
             for url in urls:
                 clean = url.strip().rstrip(".,;:!?)]}").rstrip("'").rstrip('"')
                 if not clean or clean in sent_urls:
