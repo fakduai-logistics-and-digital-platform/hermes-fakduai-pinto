@@ -1105,7 +1105,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 await self._publish_company_activity({"type":"team_meeting_started","workflowId":workflow_id,"from":"pinto","to":member,"agent":member,"status":"working" if member == pm_key else "idle","location":"meeting","task":task_text,"summary":"PM kickoff meeting: requirement intake and task split"})
 
             pm_prompt = self._company_role_prompt(pm_key, self._bot_channel_prompt({"persona": pm_key}) or f"You are {pm_key}.")
-            await self._publish_company_activity({"type":"role_started","workflowId":workflow_id,"from":"pinto","to":pm_key,"agent":pm_key,"status":"working","task":task_text,"summary":f"{pm_key} started planning and dispatch"})
+            await self._publish_company_activity({"type":"role_started","workflowId":workflow_id,"from":"pinto","to":pm_key,"agent":pm_key,"status":"working","location":"meeting","task":task_text,"summary":f"{pm_key} started planning and dispatch in kickoff meeting"})
             await self.send(chat_id, f"▶️ {pm_key} เริ่มวางแผนและแบ่งงาน")
             pm_message = (
                 f"User request for proton company workflow:\\n{task_text}\\n\\n"
