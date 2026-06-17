@@ -1088,6 +1088,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 return
 
             steps = []
+            preview_urls_sent = set()
             workflow_id = f"pinto-{chat_id}-{uuid.uuid4().hex[:8]}"
             projects_dir = os.getenv("COMPANY_PROJECTS_DIR", "/company-projects")
             project_instructions = (
@@ -1112,6 +1113,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             await self.send(chat_id, "✅ PM แบ่งงานแล้ว กำลังให้ทีมลงมือทำ")
             steps.append({"persona": pm_key, "output": pm_reply, "task": "plan and dispatch"})
             await self._stream_company_message(workflow_id=workflow_id, agent=pm_key, from_agent=pm_key, to_agent="team", task=task_text, text=pm_reply)
+            await self._send_preview_urls(chat_id, pm_reply, preview_urls_sent)
             await self._publish_company_activity({"type":"role_completed","workflowId":workflow_id,"from":pm_key,"to":"team","agent":pm_key,"status":"done","task":task_text,"summary":pm_reply[:240],"message":pm_reply[:2000]})
             await self.send(chat_id, f"✅ {pm_key} เสร็จแล้ว ส่งงานต่อให้ทีม")
             asyncio.create_task(self._restore_company_agent_idle(workflow_id, pm_key, task_text, 12))
@@ -1138,6 +1140,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
                 next_to = worker_chain[idx] if idx < len(worker_chain) else "techlead"
                 await self._stream_company_message(workflow_id=workflow_id, agent=key, from_agent=key, to_agent=next_to, task=task_for_role, text=reply)
+                await self._send_preview_urls(chat_id, reply, preview_urls_sent)
                 await self._publish_company_activity({"type":"peer_handoff","workflowId":workflow_id,"from":key,"to":next_to,"agent":key,"status":"done","task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
                 await self.send(chat_id, f"✅ {key} เสร็จแล้ว ส่งต่อให้ {next_to}")
                 asyncio.create_task(self._restore_company_agent_idle(workflow_id, key, task_for_role, 12))
@@ -1155,6 +1158,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             pm_review = await self._run_persona_turn(pm_prompt, pm_review_message)
             steps.append({"persona": pm_key, "output": pm_review, "task": "review and follow-up dispatch"})
             await self._stream_company_message(workflow_id=workflow_id, agent=pm_key, from_agent=pm_key, to_agent="team", task=task_text, text=pm_review)
+            await self._send_preview_urls(chat_id, pm_review, preview_urls_sent)
             await self._publish_company_activity({"type":"pm_review_completed","workflowId":workflow_id,"from":pm_key,"to":"team","agent":pm_key,"status":"done","task":task_text,"summary":pm_review[:240],"message":pm_review[:2000]})
             await self.send(chat_id, f"✅ {pm_key} review เสร็จแล้ว")
             asyncio.create_task(self._restore_company_agent_idle(workflow_id, pm_key, task_text, 12))
@@ -1174,6 +1178,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 reply = await self._run_persona_turn(prompt, follow_message)
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
                 await self._stream_company_message(workflow_id=workflow_id, agent=key, from_agent=key, to_agent=pm_key, task=task_for_role, text=reply)
+                await self._send_preview_urls(chat_id, reply, preview_urls_sent)
                 await self._publish_company_activity({"type":"followup_completed","workflowId":workflow_id,"from":key,"to":pm_key,"agent":key,"status":"done","task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
                 await self.send(chat_id, f"✅ {key} แก้ follow-up เสร็จแล้ว ส่งกลับ PM")
                 asyncio.create_task(self._restore_company_agent_idle(workflow_id, key, task_for_role, 12))
@@ -1187,6 +1192,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             await self.send(chat_id, "✅ Tech Lead กำลังสรุป final")
             handoff = await self._run_persona_turn(final_prompt, final_message)
             await self._stream_company_message(workflow_id=workflow_id, agent=reviewer_key, from_agent=reviewer_key, to_agent="pinto", task=task_text, text=handoff)
+            await self._send_preview_urls(chat_id, handoff, preview_urls_sent)
             await self._publish_company_activity({"type":"workflow_completed","workflowId":workflow_id,"from":reviewer_key,"to":"pinto","agent":reviewer_key,"status":"done","task":task_text,"summary":handoff[:240],"message":handoff[:2000]})
             await self.send(chat_id, handoff)
         except Exception:
@@ -1195,6 +1201,22 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 await self.send(chat_id, "✖️ company workflow ล้มเหลว ดู log ฝั่ง Hermes Gateway")
             except Exception:
                 pass
+
+    async def _send_preview_urls(self, chat_id: str, text: str, sent_urls: set) -> None:
+        # Surface hosted preview URLs as soon as any role mentions them, once per workflow.
+        try:
+            if not text:
+                return
+            import re
+            urls = re.findall(r"https://[^\s<>)\]\\\"']+(?:workers\.dev|pages\.dev|trycloudflare\.com)[^\s<>)\]\\\"']*", str(text))
+            for url in urls:
+                clean = url.rstrip(".,;:!?)]}'\"")
+                if not clean or clean in sent_urls:
+                    continue
+                sent_urls.add(clean)
+                await self.send(chat_id, f"🌐 Preview พร้อมแล้ว: {clean}")
+        except Exception:
+            logger.debug("Failed to send preview URL", exc_info=True)
 
     async def _restore_company_agent_idle(self, workflow_id: str, agent: str, task: str, delay_seconds: int = 12) -> None:
         # Keep Done visible briefly, then return the desk/card to Idle unless a newer event made it Working again.
