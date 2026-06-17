@@ -941,6 +941,22 @@ publish_method = '''    async def _publish_company_activity(self, event: dict) -
         except Exception:
             logger.debug("company dashboard activity publish failed", exc_info=True)
 
+    async def _stream_company_message(self, *, workflow_id: str, agent: str, from_agent: str, to_agent: str, task: str, text: str) -> None:
+        """Pseudo-stream completed agent output to the dashboard as cumulative chunks."""
+        if not text:
+            return
+        stream_id = f"stream-{uuid.uuid4().hex}"
+        await self._publish_company_activity({"type":"message_started","kind":"message_started","workflowId":workflow_id,"from":from_agent,"to":agent,"agent":agent,"status":"working","task":task,"summary":f"{agent} started speaking","streamId":stream_id,"message":""})
+        clean = str(text).strip()
+        step = int(os.getenv("HERMES_COMPANY_STREAM_CHARS", "90") or "90")
+        delay = float(os.getenv("HERMES_COMPANY_STREAM_DELAY", "0.08") or "0.08")
+        for end in range(step, min(len(clean), 2000) + step, step):
+            chunk = clean[:end]
+            await self._publish_company_activity({"type":"message_delta","kind":"message_delta","workflowId":workflow_id,"from":from_agent,"to":agent,"agent":agent,"status":"working","task":task,"summary":chunk[:240],"message":chunk,"streamId":stream_id})
+            if delay > 0:
+                await asyncio.sleep(delay)
+        await self._publish_company_activity({"type":"message_completed","kind":"message_completed","workflowId":workflow_id,"from":from_agent,"to":to_agent,"agent":agent,"status":"idle","task":task,"summary":clean[:240],"message":clean[:2000],"streamId":stream_id})
+
 '''
 if 'async def _publish_company_activity(' not in s:
     if publish_marker not in s:
@@ -950,6 +966,32 @@ if 'async def _publish_company_activity(' not in s:
 else:
     print('Pinto adapter company dashboard activity publisher already applied')
 
+
+stream_marker = '    async def _run_persona_turn(self, system_prompt: str, user_message: str) -> str:\n'
+stream_method = '''    async def _stream_company_message(self, *, workflow_id: str, agent: str, from_agent: str, to_agent: str, task: str, text: str) -> None:
+        """Pseudo-stream completed agent output to the dashboard as cumulative chunks."""
+        if not text:
+            return
+        stream_id = f"stream-{uuid.uuid4().hex}"
+        await self._publish_company_activity({"type":"message_started","kind":"message_started","workflowId":workflow_id,"from":from_agent,"to":agent,"agent":agent,"status":"working","task":task,"summary":f"{agent} started speaking","streamId":stream_id,"message":""})
+        clean = str(text).strip()
+        step = int(os.getenv("HERMES_COMPANY_STREAM_CHARS", "90") or "90")
+        delay = float(os.getenv("HERMES_COMPANY_STREAM_DELAY", "0.08") or "0.08")
+        for end in range(step, min(len(clean), 2000) + step, step):
+            chunk = clean[:end]
+            await self._publish_company_activity({"type":"message_delta","kind":"message_delta","workflowId":workflow_id,"from":from_agent,"to":agent,"agent":agent,"status":"working","task":task,"summary":chunk[:240],"message":chunk,"streamId":stream_id})
+            if delay > 0:
+                await asyncio.sleep(delay)
+        await self._publish_company_activity({"type":"message_completed","kind":"message_completed","workflowId":workflow_id,"from":from_agent,"to":to_agent,"agent":agent,"status":"idle","task":task,"summary":clean[:240],"message":clean[:2000],"streamId":stream_id})
+
+'''
+if 'async def _stream_company_message(' not in s:
+    if stream_marker not in s:
+        raise SystemExit('Expected _run_persona_turn marker for company message streamer not found')
+    s = s.replace(stream_marker, stream_method + stream_marker, 1)
+    patched = True
+else:
+    print('Pinto adapter company message streamer already applied')
 
 # Force-upgrade company workflow method to PM dispatch orchestration, even when
 # older dashboard-activity workflow code is already present in the adapter.
@@ -991,6 +1033,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             pm_reply = await self._run_persona_turn(pm_prompt, pm_message)
             await self.send(chat_id, "✅ PM แบ่งงานแล้ว กำลังให้ทีมลงมือทำ")
             steps.append({"persona": pm_key, "output": pm_reply, "task": "plan and dispatch"})
+            await self._stream_company_message(workflow_id=workflow_id, agent=pm_key, from_agent=pm_key, to_agent="team", task=task_text, text=pm_reply)
             await self._publish_company_activity({"type":"role_completed","workflowId":workflow_id,"from":pm_key,"to":"team","agent":pm_key,"status":"idle","task":task_text,"summary":pm_reply[:240],"message":pm_reply[:2000]})
 
             dispatch = self._extract_pm_tasks(pm_reply, worker_chain)
@@ -1013,6 +1056,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 worker_outputs.append({"persona": key, "output": reply, "task": task_for_role})
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
                 next_to = worker_chain[idx] if idx < len(worker_chain) else "techlead"
+                await self._stream_company_message(workflow_id=workflow_id, agent=key, from_agent=key, to_agent=next_to, task=task_for_role, text=reply)
                 await self._publish_company_activity({"type":"peer_handoff","workflowId":workflow_id,"from":key,"to":next_to,"agent":key,"status":"idle","task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
 
             await self.send(chat_id, "✅ ทีมทำงานรอบแรกครบแล้ว กำลังให้ PM review")
@@ -1026,6 +1070,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             )
             pm_review = await self._run_persona_turn(pm_prompt, pm_review_message)
             steps.append({"persona": pm_key, "output": pm_review, "task": "review and follow-up dispatch"})
+            await self._stream_company_message(workflow_id=workflow_id, agent=pm_key, from_agent=pm_key, to_agent="team", task=task_text, text=pm_review)
             await self._publish_company_activity({"type":"pm_review_completed","workflowId":workflow_id,"from":pm_key,"to":"team","agent":pm_key,"status":"idle","task":task_text,"summary":pm_review[:240],"message":pm_review[:2000]})
             followups = self._extract_pm_tasks(pm_review, worker_chain)
             if followups:
@@ -1041,6 +1086,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 )
                 reply = await self._run_persona_turn(prompt, follow_message)
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
+                await self._stream_company_message(workflow_id=workflow_id, agent=key, from_agent=key, to_agent=pm_key, task=task_for_role, text=reply)
                 await self._publish_company_activity({"type":"followup_completed","workflowId":workflow_id,"from":key,"to":pm_key,"agent":key,"status":"idle","task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
 
             reviewer_key = "techlead" if "techlead" in worker_chain else worker_chain[-1] if worker_chain else pm_key
@@ -1050,6 +1096,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             final_message = f"Original user request:\\n{task_text}\\n\\nTeam outputs:\\n{combined_outputs}\\n\\nCreate the final answer to the Pinto user. Be practical, consolidated, and avoid repeating internal chatter."
             await self.send(chat_id, "✅ Tech Lead กำลังสรุป final")
             handoff = await self._run_persona_turn(final_prompt, final_message)
+            await self._stream_company_message(workflow_id=workflow_id, agent=reviewer_key, from_agent=reviewer_key, to_agent="pinto", task=task_text, text=handoff)
             await self._publish_company_activity({"type":"workflow_completed","workflowId":workflow_id,"from":reviewer_key,"to":"pinto","agent":reviewer_key,"status":"done","task":task_text,"summary":handoff[:240],"message":handoff[:2000]})
             await self.send(chat_id, handoff)
         except Exception:
