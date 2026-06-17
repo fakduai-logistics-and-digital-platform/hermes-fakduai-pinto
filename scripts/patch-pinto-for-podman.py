@@ -717,6 +717,105 @@ if 'async def _run_company_workflow(' not in s:
 else:
     print('Pinto adapter company workflow method already applied')
 
+activity_old = '''            handoff = task_text
+            steps = []
+            personas = getattr(self, "_persona_configs", {}) or {}
+            for key in chain:
+                persona_cfg = personas.get(key) if isinstance(personas, dict) else None
+                persona_cfg = persona_cfg if isinstance(persona_cfg, dict) else {}
+                prompt = self._bot_channel_prompt({"persona": key}) or f"You are {key}."
+                user_message = (
+                    f"Company workflow task:\\n{task_text}\\n\\n"
+                    f"Current handoff/input for persona '{key}':\\n{handoff}\\n\\n"
+                    "Return concise output plus any explicit handoff notes for the next persona."
+                )
+                reply = await self._run_persona_turn(prompt, user_message)
+                steps.append({"persona": key, "output": reply})
+                handoff = reply
+
+            await self.send(chat_id, handoff)
+'''
+activity_new = '''            handoff = task_text
+            steps = []
+            personas = getattr(self, "_persona_configs", {}) or {}
+            workflow_id = f"pinto-{chat_id}-{uuid.uuid4().hex[:8]}"
+            for key in chain:
+                persona_cfg = personas.get(key) if isinstance(personas, dict) else None
+                persona_cfg = persona_cfg if isinstance(persona_cfg, dict) else {}
+                prompt = self._bot_channel_prompt({"persona": key}) or f"You are {key}."
+                await self._publish_company_activity({
+                    "type": "role_started",
+                    "workflowId": workflow_id,
+                    "from": "pinto",
+                    "to": key,
+                    "agent": key,
+                    "status": "working",
+                    "task": task_text,
+                    "summary": f"{key} started: {task_text[:180]}",
+                })
+                user_message = (
+                    f"Company workflow task:\\n{task_text}\\n\\n"
+                    f"Current handoff/input for persona '{key}':\\n{handoff}\\n\\n"
+                    "Return concise output plus any explicit handoff notes for the next persona."
+                )
+                reply = await self._run_persona_turn(prompt, user_message)
+                steps.append({"persona": key, "output": reply})
+                await self._publish_company_activity({
+                    "type": "role_completed",
+                    "workflowId": workflow_id,
+                    "from": key,
+                    "to": chain[chain.index(key)+1] if chain.index(key)+1 < len(chain) else "pinto",
+                    "agent": key,
+                    "status": "idle",
+                    "task": task_text,
+                    "summary": reply[:240],
+                })
+                handoff = reply
+
+            await self._publish_company_activity({
+                "type": "workflow_completed",
+                "workflowId": workflow_id,
+                "from": chain[-1] if chain else "hermes",
+                "to": "pinto",
+                "status": "done",
+                "task": task_text,
+                "summary": handoff[:240],
+            })
+            await self.send(chat_id, handoff)
+'''
+if activity_old in s:
+    s = s.replace(activity_old, activity_new, 1)
+    patched = True
+elif 'role_started' in s and '_publish_company_activity' in s:
+    print('Pinto adapter company dashboard activity loop already applied')
+else:
+    print('Pinto adapter company activity loop patch skipped (shape changed)')
+
+publish_marker = '    async def _run_persona_turn(self, system_prompt: str, user_message: str) -> str:\n'
+publish_method = '''    async def _publish_company_activity(self, event: dict) -> None:
+        """Best-effort publish of Hermes company workflow activity to local dashboard."""
+        url = os.getenv("HERMES_COMPANY_DASHBOARD_ACTIVITY_URL", "http://host.containers.internal:8090/api/hermes/activity")
+        if not url:
+            return
+        try:
+            event = dict(event or {})
+            event.setdefault("ts", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+            event.setdefault("sendId", f"hermes-{uuid.uuid4().hex}")
+            if HTTPX_AVAILABLE and httpx is not None:
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    await client.post(url, json=event)
+        except Exception:
+            logger.debug("company dashboard activity publish failed", exc_info=True)
+
+'''
+if 'async def _publish_company_activity(' not in s:
+    if publish_marker not in s:
+        raise SystemExit('Expected _run_persona_turn marker for activity publisher not found')
+    s = s.replace(publish_marker, publish_method + publish_marker, 1)
+    patched = True
+else:
+    print('Pinto adapter company dashboard activity publisher already applied')
+
 extra_config_marker = '        self._persona_configs = extra.get("pintoAgents") if isinstance(extra.get("pintoAgents"), dict) else {}\n'
 if 'self._extra_config = extra\n' not in s:
     if extra_config_marker not in s:
