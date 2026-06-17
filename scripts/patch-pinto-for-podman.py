@@ -1210,7 +1210,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             import re
             urls = re.findall(r"https://[^\s<>)\]\\\"']+(?:workers\.dev|pages\.dev|trycloudflare\.com)[^\s<>)\]\\\"']*", str(text))
             for url in urls:
-                clean = url.rstrip(".,;:!?)]}'\"")
+                clean = url.strip().rstrip(".,;:!?)]}").rstrip("'").rstrip('"')
                 if not clean or clean in sent_urls:
                     continue
                 sent_urls.add(clean)
