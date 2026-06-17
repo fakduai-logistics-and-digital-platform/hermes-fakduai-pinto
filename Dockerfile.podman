@@ -37,6 +37,7 @@ RUN git clone --depth 1 --branch "${PINTO_ADAPTER_REF}" "${PINTO_ADAPTER_REPO}" 
     && cp /tmp/pinto-adapter/__init__.py /opt/hermes-pinto-plugin/__init__.py \
     && python3 /tmp/patch-pinto-for-podman.py \
     && python3 /tmp/patch-pinto-plugin-yaml.py \
+    && python3 /tmp/patch-dashboard-pinto-channels.py \
     && rm -rf /tmp/pinto-adapter /tmp/patch-pinto-for-podman.py /tmp/patch-pinto-plugin-yaml.py /tmp/patch-api-server-for-pinto-podman.py /tmp/patch-openai-image-provider.py /tmp/patch-dashboard-pinto-channels.py
 
 # Copy scripts

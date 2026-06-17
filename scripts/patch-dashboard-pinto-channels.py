@@ -1,52 +1,43 @@
 #!/usr/bin/env python3
-"""Patch Hermes Dashboard Channels API to show Pinto extra bots.
+"""Patch Hermes Dashboard Channels API for Pinto multi-bot cards.
 
-Hermes Dashboard's /channels page renders one card per messaging platform.
-Pinto can now route multiple bot IDs via platforms.pinto.extra.bots, but the
-Dashboard does not know how to display those sub-bots. This patch appends
-read-only pseudo-channel cards for each extra Pinto bot so users can see that
-multi-bot routing is configured without storing bot IDs in .env.
+Shows entries in platforms.pinto.extra.bots as editable Pinto cards that use the
+same developer-console fields as the primary Pinto card, plus Agent ID.
 """
 from pathlib import Path
 
 p = Path('/usr/local/lib/python3.11/site-packages/hermes_cli/web_server.py')
 s = p.read_text(encoding='utf-8')
 
+# Extra request model.
 model_marker = '''class MessagingPlatformUpdate(BaseModel):
     enabled: Optional[bool] = None
     env: Dict[str, str] = {}
     clear_env: List[str] = []
 
-
 '''
-model_insert = '''class MessagingPlatformUpdate(BaseModel):
-    enabled: Optional[bool] = None
-    env: Dict[str, str] = {}
-    clear_env: List[str] = []
-
-
-class PintoBotUpdate(BaseModel):
+model_insert = model_marker + '''class PintoBotUpdate(BaseModel):
+    bot_id: Optional[str] = None
+    agent_id: Optional[str] = None
     name: Optional[str] = None
     role: Optional[str] = None
     description: Optional[str] = None
     channelPrompt: Optional[str] = None
     enabled: Optional[bool] = None
 
-
 '''
-if 'class PintoBotUpdate(BaseModel):' in s:
-    print('Dashboard Pinto bot update model already patched')
-elif model_marker in s:
+if 'class PintoBotUpdate(BaseModel):' not in s:
+    if model_marker not in s:
+        raise SystemExit('Expected MessagingPlatformUpdate model block not found')
     s = s.replace(model_marker, model_insert)
 else:
-    raise SystemExit('Expected MessagingPlatformUpdate model block not found')
+    print('Dashboard Pinto bot update model already patched')
 
 helper_marker = '''def _catalog_lookup(platform_id: str) -> dict[str, Any] | None:
     for entry in _messaging_platform_catalog():
         if entry["id"] == platform_id:
             return entry
     return None
-
 
 '''
 helper_insert = '''def _catalog_lookup(platform_id: str) -> dict[str, Any] | None:
@@ -59,22 +50,18 @@ helper_insert = '''def _catalog_lookup(platform_id: str) -> dict[str, Any] | Non
             "name": "Pinto bot",
             "description": "Additional Pinto bot from platforms.pinto.extra.bots",
             "docs_url": "",
-            "env_vars": (),
-            "required_env": (),
-            "read_only": True,
+            "env_vars": ("PINTO_API_URL", "PINTO_BOT_ID", "PINTO_WEBHOOK_SECRET", "PINTO_WEBHOOK_URL", "PINTO_AGENT_ID"),
+            "required_env": ("PINTO_API_URL", "PINTO_BOT_ID", "PINTO_WEBHOOK_SECRET", "PINTO_WEBHOOK_URL"),
+            "read_only": False,
         }
     return None
 
 
 def _pinto_extra_bot_entries() -> list[dict[str, Any]]:
-    """Return read-only pseudo-channel catalog entries for Pinto extra bots."""
+    """Return editable pseudo-channel catalog entries for Pinto extra bots."""
     try:
         config = load_config()
-        extra = (
-            config.get("platforms", {})
-            .get("pinto", {})
-            .get("extra", {})
-        )
+        extra = (config.get("platforms", {}).get("pinto", {}).get("extra", {}))
         bots = extra.get("bots") if isinstance(extra, dict) else None
         if not isinstance(bots, dict):
             return []
@@ -87,33 +74,31 @@ def _pinto_extra_bot_entries() -> list[dict[str, Any]]:
         if not bot_id:
             continue
         cfg = bot_cfg if isinstance(bot_cfg, dict) else {}
-        name = str(cfg.get("name") or cfg.get("role") or bot_id)
-        description = str(
-            cfg.get("description")
-            or cfg.get("role")
-            or "Additional Pinto bot configured in platforms.pinto.extra.bots"
-        )
+        agent_id = str(cfg.get("agent_id") or cfg.get("agentId") or cfg.get("role") or cfg.get("name") or bot_id)
+        label = str(cfg.get("name") or agent_id or bot_id)
+        description = str(cfg.get("description") or f"Agent ID: {agent_id}")
         entries.append({
             "id": f"pinto:{bot_id}",
-            "name": f"Pinto / {name}",
+            "name": f"Pinto / {label}",
             "description": f"{description} — bot_id: {bot_id}",
             "docs_url": "",
-            "env_vars": (),
-            "required_env": (),
-            "read_only": True,
+            "env_vars": ("PINTO_API_URL", "PINTO_BOT_ID", "PINTO_WEBHOOK_SECRET", "PINTO_WEBHOOK_URL", "PINTO_AGENT_ID"),
+            "required_env": ("PINTO_API_URL", "PINTO_BOT_ID", "PINTO_WEBHOOK_SECRET", "PINTO_WEBHOOK_URL"),
+            "read_only": False,
             "parent_platform": "pinto",
             "bot_id": str(bot_id),
+            "agent_id": agent_id,
         })
     return entries
 
 
 '''
-if helper_insert.strip() in s:
-    print('Dashboard Pinto channel helper already patched')
-elif helper_marker in s:
+if '_pinto_extra_bot_entries()' not in s:
+    if helper_marker not in s:
+        raise SystemExit('Expected _catalog_lookup block not found')
     s = s.replace(helper_marker, helper_insert)
 else:
-    raise SystemExit('Expected _catalog_lookup block not found')
+    print('Dashboard Pinto channel helper already patched')
 
 payload_marker = '''    platform_id = entry["id"]
     gateway_running = get_running_pid() is not None
@@ -129,22 +114,12 @@ payload_insert = '''    platform_id = entry["id"]
     gateway_running = get_running_pid() is not None
     runtime_platforms = runtime.get("platforms") if runtime else {}
 
-    # Read-only pseudo-channel for Pinto extra bots. The actual enabled/configured
-    # state follows the parent Pinto platform because all bots share one adapter
-    # and webhook endpoint.
     if platform_id.startswith("pinto:"):
-        parent_runtime = (
-            runtime_platforms.get("pinto", {})
-            if isinstance(runtime_platforms, dict)
-            else {}
-        )
+        parent_runtime = runtime_platforms.get("pinto", {}) if isinstance(runtime_platforms, dict) else {}
         try:
             gateway_config, platform, platform_config = _gateway_platform_config("pinto")
             enabled = bool(platform_config and platform_config.enabled)
-            configured = bool(
-                platform_config
-                and gateway_config._is_platform_connected(platform, platform_config)
-            )
+            configured = bool(platform_config and gateway_config._is_platform_connected(platform, platform_config))
         except Exception:
             enabled = False
             configured = False
@@ -159,6 +134,36 @@ payload_insert = '''    platform_id = entry["id"]
             state = "gateway_stopped"
         if state == "connected":
             gateway_running = True
+
+        shared = {
+            "PINTO_API_URL": env_on_disk.get("PINTO_API_URL") or os.getenv("PINTO_API_URL", ""),
+            "PINTO_WEBHOOK_SECRET": env_on_disk.get("PINTO_WEBHOOK_SECRET") or os.getenv("PINTO_WEBHOOK_SECRET", ""),
+            "PINTO_WEBHOOK_URL": env_on_disk.get("PINTO_WEBHOOK_URL") or os.getenv("PINTO_WEBHOOK_URL", ""),
+            "PINTO_BOT_ID": entry.get("bot_id") or "",
+            "PINTO_AGENT_ID": entry.get("agent_id") or "",
+        }
+        prompts = {
+            "PINTO_API_URL": ("Pinto API URL", "Pinto API URL. Dev: https://api-dev.pinto-app.com, Prod: https://api.pinto-app.com"),
+            "PINTO_BOT_ID": ("Pinto Bot ID", "Bot ID from Pinto Developer Console"),
+            "PINTO_WEBHOOK_SECRET": ("Developer Console Webhook Secret", "Copy this secret into Pinto Developer Console. Shared by all Pinto bots."),
+            "PINTO_WEBHOOK_URL": ("Developer Console Webhook URL", "Copy this URL into Pinto Developer Console > Bot Webhook URL. Shared by all Pinto bots."),
+            "PINTO_AGENT_ID": ("Agent ID", "Hermes agent/persona routing ID for this Pinto bot"),
+        }
+        env_vars = []
+        for key in ("PINTO_API_URL", "PINTO_BOT_ID", "PINTO_WEBHOOK_SECRET", "PINTO_WEBHOOK_URL", "PINTO_AGENT_ID"):
+            value = shared.get(key, "")
+            prompt, description = prompts[key]
+            env_vars.append({
+                "key": key,
+                "required": key != "PINTO_AGENT_ID",
+                "is_set": bool(value),
+                "redacted_value": value or None,
+                "description": description,
+                "prompt": prompt,
+                "url": None,
+                "is_password": False,
+                "advanced": key == "PINTO_AGENT_ID",
+            })
         return {
             "id": platform_id,
             "name": entry["name"],
@@ -172,10 +177,11 @@ payload_insert = '''    platform_id = entry["id"]
             "error_message": None,
             "updated_at": None,
             "home_channel": None,
-            "env_vars": [],
-            "read_only": True,
+            "env_vars": env_vars,
+            "read_only": False,
             "parent_platform": "pinto",
             "bot_id": entry.get("bot_id"),
+            "agent_id": entry.get("agent_id"),
         }
 
     runtime_platform = (
@@ -185,12 +191,12 @@ payload_insert = '''    platform_id = entry["id"]
     )
     env_vars = []
 '''
-if payload_insert.strip() in s:
-    print('Dashboard Pinto pseudo payload already patched')
-elif payload_marker in s:
+if '"PINTO_AGENT_ID": ("Agent ID"' not in s:
+    if payload_marker not in s:
+        raise SystemExit('Expected _messaging_platform_payload header not found')
     s = s.replace(payload_marker, payload_insert)
 else:
-    raise SystemExit('Expected _messaging_platform_payload header not found')
+    print('Dashboard Pinto pseudo payload already patched')
 
 api_marker = '''@app.get("/api/messaging/platforms")
 async def get_messaging_platforms():
@@ -220,32 +226,28 @@ async def get_messaging_platforms():
 
 
 '''
-if api_insert.strip() in s:
-    print('Dashboard messaging platforms API already patched for Pinto extra bots')
-elif api_marker in s:
+if 'entries.extend(_pinto_extra_bot_entries())' not in s:
+    if api_marker not in s:
+        raise SystemExit('Expected /api/messaging/platforms block not found')
     s = s.replace(api_marker, api_insert)
 else:
-    raise SystemExit('Expected /api/messaging/platforms block not found')
+    print('Dashboard messaging platforms API already patched')
 
 endpoints_marker = '''@app.put("/api/messaging/platforms/{platform_id}")
 '''
 endpoints_insert = '''def _pinto_bots_config(config: dict[str, Any]) -> dict[str, Any]:
     platforms = config.setdefault("platforms", {})
     if not isinstance(platforms, dict):
-        platforms = {}
-        config["platforms"] = platforms
+        platforms = {}; config["platforms"] = platforms
     pinto = platforms.setdefault("pinto", {})
     if not isinstance(pinto, dict):
-        pinto = {}
-        platforms["pinto"] = pinto
+        pinto = {}; platforms["pinto"] = pinto
     extra = pinto.setdefault("extra", {})
     if not isinstance(extra, dict):
-        extra = {}
-        pinto["extra"] = extra
+        extra = {}; pinto["extra"] = extra
     bots = extra.setdefault("bots", {})
     if not isinstance(bots, dict):
-        bots = {}
-        extra["bots"] = bots
+        bots = {}; extra["bots"] = bots
     return bots
 
 
@@ -253,6 +255,7 @@ def _pinto_bot_public(bot_id: str, cfg: Any) -> dict[str, Any]:
     data = cfg if isinstance(cfg, dict) else {}
     return {
         "bot_id": bot_id,
+        "agent_id": data.get("agent_id") or data.get("agentId"),
         "name": data.get("name"),
         "role": data.get("role"),
         "description": data.get("description"),
@@ -270,15 +273,15 @@ async def list_pinto_bots():
 
 @app.put("/api/messaging/pinto/bots/{bot_id}")
 async def upsert_pinto_bot(bot_id: str, body: PintoBotUpdate):
-    bot_id = bot_id.strip()
+    bot_id = (body.bot_id or bot_id).strip()
     if not bot_id:
         raise HTTPException(status_code=400, detail="bot_id is required")
     config = load_config()
     bots = _pinto_bots_config(config)
-    current = bots.get(bot_id)
+    current = bots.get(bot_id, {})
     data = current if isinstance(current, dict) else {}
-    for key in ("name", "role", "description", "channelPrompt", "enabled"):
-        value = getattr(body, key)
+    for key in ("agent_id", "name", "role", "description", "channelPrompt", "enabled"):
+        value = getattr(body, key, None)
         if value is not None:
             if isinstance(value, str):
                 value = value.strip()
@@ -304,12 +307,12 @@ async def delete_pinto_bot(bot_id: str):
 
 @app.put("/api/messaging/platforms/{platform_id}")
 '''
-if '@app.get("/api/messaging/pinto/bots")' in s:
-    print('Dashboard Pinto bot management API already patched')
-elif endpoints_marker in s:
+if '@app.get("/api/messaging/pinto/bots")' not in s:
+    if endpoints_marker not in s:
+        raise SystemExit('Expected messaging platform PUT route marker not found')
     s = s.replace(endpoints_marker, endpoints_insert, 1)
 else:
-    raise SystemExit('Expected messaging platform PUT route marker not found')
+    print('Dashboard Pinto bot management API already patched')
 
 update_marker = '''    if not entry:
         raise HTTPException(
@@ -322,20 +325,41 @@ update_insert = '''    if not entry:
         raise HTTPException(
             status_code=404, detail=f"Unknown messaging platform: {platform_id}"
         )
-    if entry.get("read_only"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"{entry['name']} is read-only. Edit platforms.pinto.extra.bots in config.yaml.",
-        )
+    if platform_id.startswith("pinto:"):
+        old_bot_id = platform_id.split(":", 1)[1]
+        new_bot_id = (body.env.get("PINTO_BOT_ID") or old_bot_id).strip()
+        if not new_bot_id:
+            raise HTTPException(status_code=400, detail="Pinto Bot ID is required")
+        config = load_config()
+        bots = _pinto_bots_config(config)
+        current = bots.pop(old_bot_id, {}) if old_bot_id in bots else {}
+        data = current if isinstance(current, dict) else {}
+        agent_id = body.env.get("PINTO_AGENT_ID")
+        if agent_id is not None:
+            agent_id = agent_id.strip()
+            if agent_id:
+                data["agent_id"] = agent_id
+                data.setdefault("name", agent_id)
+            else:
+                data.pop("agent_id", None)
+        if body.enabled is not None:
+            data["enabled"] = body.enabled
+        bots[new_bot_id] = data
+        save_config(config)
+        return {"ok": True, "platform": f"pinto:{new_bot_id}", "needs_restart": True}
 
     allowed_env = set(entry["env_vars"])
 '''
-if 'is read-only. Edit platforms.pinto.extra.bots in config.yaml' in s:
-    print('Dashboard read-only Pinto pseudo-channel guard already patched')
-elif update_marker in s:
+if 'Pinto Bot ID is required' not in s:
+    if update_marker not in s:
+        raise SystemExit('Expected update_messaging_platform guard block not found')
     s = s.replace(update_marker, update_insert, 1)
 else:
-    raise SystemExit('Expected update_messaging_platform guard block not found')
+    print('Dashboard editable Pinto pseudo-channel guard already patched')
+
+# Show primary Pinto bot id/api url as normal values, not redacted secrets.
+s = s.replace('("PINTO_WEBHOOK_URL", "PINTO_WEBHOOK_SECRET")', '("PINTO_API_URL", "PINTO_BOT_ID", "PINTO_WEBHOOK_URL", "PINTO_WEBHOOK_SECRET")')
+s = s.replace('key == "PINTO_WEBHOOK_URL"', 'key in ("PINTO_API_URL", "PINTO_BOT_ID", "PINTO_WEBHOOK_URL")')
 
 p.write_text(s, encoding='utf-8')
-print('Patched Dashboard Channels API for Pinto extra bots')
+print('Patched Dashboard Channels API for editable Pinto bot cards')

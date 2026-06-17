@@ -35,10 +35,13 @@ p = Path('/usr/local/lib/python3.11/site-packages/hermes_cli/web_server.py')
 if p.exists():
     text = p.read_text(encoding='utf-8')
     old = '                "redacted_value": redact_key(value) if value else None,\n                **_messaging_env_info(key),'
-    new = '                "redacted_value": (value if key in ("PINTO_WEBHOOK_URL", "PINTO_WEBHOOK_SECRET") else (redact_key(value) if value else None)),\n                **_messaging_env_info(key),'
+    new = '                "redacted_value": (value if key in ("PINTO_API_URL", "PINTO_BOT_ID", "PINTO_WEBHOOK_URL", "PINTO_WEBHOOK_SECRET") else (redact_key(value) if value else None)),\n                **_messaging_env_info(key),'
     if old in text and new not in text:
         text = text.replace(old, new)
     old = '                "redacted_value": (value if key == "PINTO_WEBHOOK_URL" else (redact_key(value) if value else None)),\n                **_messaging_env_info(key),'
+    if old in text and new not in text:
+        text = text.replace(old, new)
+    old = '                "redacted_value": (value if key in ("PINTO_WEBHOOK_URL", "PINTO_WEBHOOK_SECRET") else (redact_key(value) if value else None)),\n                **_messaging_env_info(key),'
     if old in text and new not in text:
         text = text.replace(old, new)
     p.write_text(text, encoding='utf-8')
@@ -51,7 +54,7 @@ for root in Path('/usr/local/lib/python3.11/site-packages').rglob('assets'):
     for js in root.glob('index-*.js'):
         text = js.read_text(encoding='utf-8')
         old = 'M.env_vars.forEach(P=>{R[P.key]=""})'
-        new = 'M.env_vars.forEach(P=>{R[P.key]=M.id==="pinto"&&(P.key==="PINTO_WEBHOOK_URL"||P.key==="PINTO_WEBHOOK_SECRET")&&P.redacted_value?P.redacted_value:""})'
+        new = 'M.env_vars.forEach(P=>{R[P.key]=((M.id==="pinto"&&(P.key==="PINTO_API_URL"||P.key==="PINTO_BOT_ID"||P.key==="PINTO_WEBHOOK_URL"||P.key==="PINTO_WEBHOOK_SECRET"))||M.id.startsWith("pinto:"))&&P.redacted_value?P.redacted_value:""})'
         if old in text and new not in text:
             text = text.replace(old, new)
         old = 'l.jsx(ot,{id:`field-${M.key}`,type:M.is_password?"password":"text",placeholder:M.is_set?M.redacted_value||"•••••• (set — leave blank to keep)":M.key,value:f[M.key]??"",onChange:R=>g(P=>({...P,[M.key]:R.target.value}))})'
