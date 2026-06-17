@@ -1023,6 +1023,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
 
             pm_prompt = self._bot_channel_prompt({"persona": pm_key}) or f"You are {pm_key}."
             await self._publish_company_activity({"type":"role_started","workflowId":workflow_id,"from":"pinto","to":pm_key,"agent":pm_key,"status":"working","task":task_text,"summary":f"{pm_key} started planning and dispatch"})
+            await self.send(chat_id, f"▶️ {pm_key} เริ่มวางแผนและแบ่งงาน")
             pm_message = (
                 f"User request for proton company workflow:\\n{task_text}\\n\\n"
                 f"You are '{pm_key}'. Break this into role-specific tasks for these agents: {', '.join(worker_chain)}.\n"
@@ -1034,7 +1035,9 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             await self.send(chat_id, "✅ PM แบ่งงานแล้ว กำลังให้ทีมลงมือทำ")
             steps.append({"persona": pm_key, "output": pm_reply, "task": "plan and dispatch"})
             await self._stream_company_message(workflow_id=workflow_id, agent=pm_key, from_agent=pm_key, to_agent="team", task=task_text, text=pm_reply)
-            await self._publish_company_activity({"type":"role_completed","workflowId":workflow_id,"from":pm_key,"to":"team","agent":pm_key,"status":"idle","task":task_text,"summary":pm_reply[:240],"message":pm_reply[:2000]})
+            await self._publish_company_activity({"type":"role_completed","workflowId":workflow_id,"from":pm_key,"to":"team","agent":pm_key,"status":"done","task":task_text,"summary":pm_reply[:240],"message":pm_reply[:2000]})
+            await self.send(chat_id, f"✅ {pm_key} เสร็จแล้ว ส่งงานต่อให้ทีม")
+            asyncio.create_task(self._restore_company_agent_idle(workflow_id, pm_key, task_text, 12))
 
             dispatch = self._extract_pm_tasks(pm_reply, worker_chain)
             worker_outputs = []
@@ -1043,6 +1046,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 prompt = self._bot_channel_prompt({"persona": key}) or f"You are {key}."
                 from_agent = pm_key if idx == 1 else worker_chain[idx - 2]
                 await self._publish_company_activity({"type":"task_dispatched","workflowId":workflow_id,"from":from_agent,"to":key,"agent":key,"status":"working","task":task_for_role,"summary":f"{from_agent} -> {key}: {task_for_role[:180]}"})
+                await self.send(chat_id, f"▶️ {key} เริ่มทำงาน")
                 prior_outputs = "\\n\\n".join(f"[{item['persona']}]\\n{item['output']}" for item in worker_outputs[-3:])
                 peer_context = prior_outputs or pm_reply
                 user_message = (
@@ -1057,11 +1061,14 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
                 next_to = worker_chain[idx] if idx < len(worker_chain) else "techlead"
                 await self._stream_company_message(workflow_id=workflow_id, agent=key, from_agent=key, to_agent=next_to, task=task_for_role, text=reply)
-                await self._publish_company_activity({"type":"peer_handoff","workflowId":workflow_id,"from":key,"to":next_to,"agent":key,"status":"idle","task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
+                await self._publish_company_activity({"type":"peer_handoff","workflowId":workflow_id,"from":key,"to":next_to,"agent":key,"status":"done","task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
+                await self.send(chat_id, f"✅ {key} เสร็จแล้ว ส่งต่อให้ {next_to}")
+                asyncio.create_task(self._restore_company_agent_idle(workflow_id, key, task_for_role, 12))
 
             await self.send(chat_id, "✅ ทีมทำงานรอบแรกครบแล้ว กำลังให้ PM review")
             team_outputs = "\\n\\n".join(f"[{step.get('persona')}] task={step.get('task','')}\\n{step.get('output','')}" for step in steps)
             await self._publish_company_activity({"type":"pm_review_started","workflowId":workflow_id,"from":"team","to":pm_key,"agent":pm_key,"status":"working","task":task_text,"summary":f"{pm_key} reviewing team outputs for follow-up"})
+            await self.send(chat_id, f"▶️ {pm_key} เริ่ม review งานทีม")
             pm_review_message = (
                 f"Original user request:\\n{task_text}\\n\\n"
                 f"Team outputs so far:\\n{team_outputs}\\n\\n"
@@ -1071,13 +1078,16 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             pm_review = await self._run_persona_turn(pm_prompt, pm_review_message)
             steps.append({"persona": pm_key, "output": pm_review, "task": "review and follow-up dispatch"})
             await self._stream_company_message(workflow_id=workflow_id, agent=pm_key, from_agent=pm_key, to_agent="team", task=task_text, text=pm_review)
-            await self._publish_company_activity({"type":"pm_review_completed","workflowId":workflow_id,"from":pm_key,"to":"team","agent":pm_key,"status":"idle","task":task_text,"summary":pm_review[:240],"message":pm_review[:2000]})
+            await self._publish_company_activity({"type":"pm_review_completed","workflowId":workflow_id,"from":pm_key,"to":"team","agent":pm_key,"status":"done","task":task_text,"summary":pm_review[:240],"message":pm_review[:2000]})
+            await self.send(chat_id, f"✅ {pm_key} review เสร็จแล้ว")
+            asyncio.create_task(self._restore_company_agent_idle(workflow_id, pm_key, task_text, 12))
             followups = self._extract_pm_tasks(pm_review, worker_chain)
             if followups:
                 await self.send(chat_id, f"⚠️ PM เจอ follow-up {len(followups)} งาน กำลังส่งกลับทีมที่เกี่ยวข้อง")
             for key, task_for_role in followups.items():
                 prompt = self._bot_channel_prompt({"persona": key}) or f"You are {key}."
                 await self._publish_company_activity({"type":"followup_dispatched","workflowId":workflow_id,"from":pm_key,"to":key,"agent":key,"status":"working","task":task_for_role,"summary":f"{pm_key} follow-up -> {key}: {task_for_role[:180]}"})
+                await self.send(chat_id, f"🔁 {key} กลับไปแก้ follow-up")
                 follow_message = (
                     f"Original user request:\\n{task_text}\\n\\n"
                     f"Team outputs and PM review:\\n{team_outputs}\\n\\nPM review:\\n{pm_review}\\n\\n"
@@ -1087,12 +1097,15 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 reply = await self._run_persona_turn(prompt, follow_message)
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
                 await self._stream_company_message(workflow_id=workflow_id, agent=key, from_agent=key, to_agent=pm_key, task=task_for_role, text=reply)
-                await self._publish_company_activity({"type":"followup_completed","workflowId":workflow_id,"from":key,"to":pm_key,"agent":key,"status":"idle","task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
+                await self._publish_company_activity({"type":"followup_completed","workflowId":workflow_id,"from":key,"to":pm_key,"agent":key,"status":"done","task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
+                await self.send(chat_id, f"✅ {key} แก้ follow-up เสร็จแล้ว ส่งกลับ PM")
+                asyncio.create_task(self._restore_company_agent_idle(workflow_id, key, task_for_role, 12))
 
             reviewer_key = "techlead" if "techlead" in worker_chain else worker_chain[-1] if worker_chain else pm_key
             final_prompt = self._bot_channel_prompt({"persona": reviewer_key}) or f"You are {reviewer_key}."
             combined_outputs = "\\n\\n".join(f"[{step.get('persona')}] task={step.get('task','')}\\n{step.get('output','')}" for step in steps)
             await self._publish_company_activity({"type":"review_started","workflowId":workflow_id,"from":"team","to":reviewer_key,"agent":reviewer_key,"status":"working","task":task_text,"summary":f"{reviewer_key} started final review"})
+            await self.send(chat_id, f"▶️ {reviewer_key} เริ่ม final review")
             final_message = f"Original user request:\\n{task_text}\\n\\nTeam outputs:\\n{combined_outputs}\\n\\nCreate the final answer to the Pinto user. Be practical, consolidated, and avoid repeating internal chatter."
             await self.send(chat_id, "✅ Tech Lead กำลังสรุป final")
             handoff = await self._run_persona_turn(final_prompt, final_message)
@@ -1105,6 +1118,24 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 await self.send(chat_id, "✖️ company workflow ล้มเหลว ดู log ฝั่ง Hermes Gateway")
             except Exception:
                 pass
+
+    async def _restore_company_agent_idle(self, workflow_id: str, agent: str, task: str, delay_seconds: int = 12) -> None:
+        # Keep Done visible briefly, then return the desk/card to Idle unless a newer event made it Working again.
+        try:
+            await asyncio.sleep(max(1, int(delay_seconds)))
+            await self._publish_company_activity({
+                "type": "role_idle",
+                "workflowId": workflow_id,
+                "from": agent,
+                "to": agent,
+                "agent": agent,
+                "status": "idle",
+                "task": task,
+                "summary": f"{agent} idle after completed handoff",
+                "message": "Waiting for next task",
+            })
+        except Exception:
+            logger.debug("Failed to restore company agent idle", exc_info=True)
 
     def _extract_pm_tasks(self, text: str, allowed_agents: list) -> dict:
         # Extract PM JSON dispatch tasks from model output.
