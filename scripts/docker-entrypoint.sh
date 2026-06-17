@@ -67,6 +67,16 @@ for root in Path('/usr/local/lib/python3.11/site-packages').rglob('assets'):
         js.write_text(text, encoding='utf-8')
 PY
 
+# ── Company project artifact directory ──
+# Expose a stable container path for generated projects. It points inside
+# HERMES_HOME so host users can see artifacts through the existing bind mount.
+COMPANY_PROJECTS_DIR="${COMPANY_PROJECTS_DIR:-/company-projects}"
+mkdir -p "${HERMES_HOME}/company-projects"
+if [ "${COMPANY_PROJECTS_DIR}" != "${HERMES_HOME}/company-projects" ]; then
+  rm -rf "${COMPANY_PROJECTS_DIR}" 2>/dev/null || true
+  ln -s "${HERMES_HOME}/company-projects" "${COMPANY_PROJECTS_DIR}" 2>/dev/null || true
+fi
+
 # ── Runtime defaults ──
 # Fill friendly defaults into ~/.hermes/.env so Dashboard shows useful values.
 # Secrets are random per install and are never hardcoded in the image/repo.

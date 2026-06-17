@@ -854,6 +854,7 @@ activity_new = '''            handoff = task_text
                 f"Team outputs:\\n{combined_outputs}\\n\\n"
                 "Create the final answer to the Pinto user. Be practical, consolidated, and avoid repeating internal chatter."
             )
+            await self.send(chat_id, "✅ Tech Lead กำลังสรุป final")
             handoff = await self._run_persona_turn(final_prompt, final_message)
             await self._publish_company_activity({
                 "type": "workflow_completed",
@@ -970,6 +971,11 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
 
             steps = []
             workflow_id = f"pinto-{chat_id}-{uuid.uuid4().hex[:8]}"
+            projects_dir = os.getenv("COMPANY_PROJECTS_DIR", "/company-projects")
+            project_instructions = (
+                f"Generated project files must be written under {projects_dir}/<project-name>. "
+                "Never write generated project files under /root. Use a clear project slug such as proton-landing."
+            )
             pm_key = chain[0]
             worker_chain = [key for key in chain[1:] if key]
 
@@ -983,6 +989,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 "Only include available agents. Each task must be different and fit that role."
             )
             pm_reply = await self._run_persona_turn(pm_prompt, pm_message)
+            await self.send(chat_id, "✅ PM แบ่งงานแล้ว กำลังให้ทีมลงมือทำ")
             steps.append({"persona": pm_key, "output": pm_reply, "task": "plan and dispatch"})
             await self._publish_company_activity({"type":"role_completed","workflowId":workflow_id,"from":pm_key,"to":"team","agent":pm_key,"status":"idle","task":task_text,"summary":pm_reply[:240]})
 
@@ -1008,6 +1015,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 next_to = worker_chain[idx] if idx < len(worker_chain) else "techlead"
                 await self._publish_company_activity({"type":"peer_handoff","workflowId":workflow_id,"from":key,"to":next_to,"agent":key,"status":"idle","task":task_for_role,"summary":reply[:240]})
 
+            await self.send(chat_id, "✅ ทีมทำงานรอบแรกครบแล้ว กำลังให้ PM review")
             team_outputs = "\\n\\n".join(f"[{step.get('persona')}] task={step.get('task','')}\\n{step.get('output','')}" for step in steps)
             await self._publish_company_activity({"type":"pm_review_started","workflowId":workflow_id,"from":"team","to":pm_key,"agent":pm_key,"status":"working","task":task_text,"summary":f"{pm_key} reviewing team outputs for follow-up"})
             pm_review_message = (
@@ -1020,6 +1028,8 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             steps.append({"persona": pm_key, "output": pm_review, "task": "review and follow-up dispatch"})
             await self._publish_company_activity({"type":"pm_review_completed","workflowId":workflow_id,"from":pm_key,"to":"team","agent":pm_key,"status":"idle","task":task_text,"summary":pm_review[:240]})
             followups = self._extract_pm_tasks(pm_review, worker_chain)
+            if followups:
+                await self.send(chat_id, f"⚠️ PM เจอ follow-up {len(followups)} งาน กำลังส่งกลับทีมที่เกี่ยวข้อง")
             for key, task_for_role in followups.items():
                 prompt = self._bot_channel_prompt({"persona": key}) or f"You are {key}."
                 await self._publish_company_activity({"type":"followup_dispatched","workflowId":workflow_id,"from":pm_key,"to":key,"agent":key,"status":"working","task":task_for_role,"summary":f"{pm_key} follow-up -> {key}: {task_for_role[:180]}"})
@@ -1038,6 +1048,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             combined_outputs = "\\n\\n".join(f"[{step.get('persona')}] task={step.get('task','')}\\n{step.get('output','')}" for step in steps)
             await self._publish_company_activity({"type":"review_started","workflowId":workflow_id,"from":"team","to":reviewer_key,"agent":reviewer_key,"status":"working","task":task_text,"summary":f"{reviewer_key} started final review"})
             final_message = f"Original user request:\\n{task_text}\\n\\nTeam outputs:\\n{combined_outputs}\\n\\nCreate the final answer to the Pinto user. Be practical, consolidated, and avoid repeating internal chatter."
+            await self.send(chat_id, "✅ Tech Lead กำลังสรุป final")
             handoff = await self._run_persona_turn(final_prompt, final_message)
             await self._publish_company_activity({"type":"workflow_completed","workflowId":workflow_id,"from":reviewer_key,"to":"pinto","status":"done","task":task_text,"summary":handoff[:240]})
             await self.send(chat_id, handoff)
