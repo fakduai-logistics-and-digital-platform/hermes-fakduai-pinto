@@ -1125,7 +1125,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             await self.send(chat_id, f"✅ {pm_key} เสร็จแล้ว ส่งงานต่อให้ทีม")
             asyncio.create_task(self._restore_company_agent_idle(workflow_id, pm_key, task_text, 12))
             for member in meeting_agents:
-                await self._publish_company_activity({"type":"team_meeting_ended","workflowId":workflow_id,"from":pm_key,"to":member,"agent":member,"status":"done" if member == pm_key else "idle","location":"desk","task":task_text,"summary":"PM kickoff meeting ended; agents return to desks"})
+                await self._publish_company_activity({"type":"team_meeting_ended","workflowId":workflow_id,"from":pm_key,"to":member,"agent":member,"status":"idle" if member == pm_key else "idle","location":"meeting" if member == pm_key else "desk","task":task_text,"summary":"PM stays in meeting room; agents return to desks"})
 
             dispatch = self._extract_pm_tasks(pm_reply, worker_chain)
             worker_outputs = []
@@ -1154,10 +1154,11 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 await self._stream_company_message(workflow_id=workflow_id, agent=key, from_agent=key, to_agent=next_to, task=task_for_role, text=reply)
                 await self._send_preview_urls(chat_id, reply, preview_urls_sent)
                 await self._publish_company_activity({"type":"todo_completed","workflowId":workflow_id,"from":key,"to":key,"agent":key,"status":"done","task":task_for_role,"summary":f"{key} completed {len(role_todos)}/{len(role_todos)} todos","todos":role_todos,"todoIndex":len(role_todos),"todoTotal":len(role_todos),"message":reply[:1200]})
-                await self._publish_company_activity({"type":"peer_handoff","workflowId":workflow_id,"from":key,"to":next_to,"agent":key,"status":"done","location":"talk","task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
-                await self._publish_company_activity({"type":"submitted_to_pm","workflowId":workflow_id,"from":key,"to":pm_key,"agent":key,"status":"done","location":"talk","task":task_for_role,"summary":f"{key} submitted work to PM and is waiting for feedback","message":reply[:1200]})
+                handoff_location = f"visit:{next_to}" if next_to in worker_chain else "visit:techlead"
+                await self._publish_company_activity({"type":"peer_handoff","workflowId":workflow_id,"from":key,"to":next_to,"agent":key,"status":"done","location":handoff_location,"task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
                 await self.send(chat_id, f"✅ {key} เสร็จแล้ว ส่งต่อให้ {next_to}")
 
+            await self._publish_company_activity({"type":"pm_waiting","workflowId":workflow_id,"from":pm_key,"to":"team","agent":pm_key,"status":"idle","location":"meeting","task":task_text,"summary":"PM waits in meeting room while team works"})
             await self.send(chat_id, "✅ ทีมทำงานรอบแรกครบแล้ว กำลังให้ PM review")
             team_outputs = "\\n\\n".join(f"[{step.get('persona')}] task={step.get('task','')}\\n{step.get('output','')}" for step in steps)
             await self._publish_company_activity({"type":"pm_review_started","workflowId":workflow_id,"from":"team","to":pm_key,"agent":pm_key,"status":"working","task":task_text,"summary":f"{pm_key} reviewing team outputs for follow-up"})
@@ -1199,16 +1200,16 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 await self._stream_company_message(workflow_id=workflow_id, agent=key, from_agent=key, to_agent=pm_key, task=task_for_role, text=reply)
                 await self._send_preview_urls(chat_id, reply, preview_urls_sent)
                 await self._publish_company_activity({"type":"todo_completed","workflowId":workflow_id,"from":key,"to":key,"agent":key,"status":"done","task":task_for_role,"summary":f"{key} completed {len(role_todos)}/{len(role_todos)} follow-up todos","todos":role_todos,"todoIndex":len(role_todos),"todoTotal":len(role_todos),"message":reply[:1200]})
-                await self._publish_company_activity({"type":"followup_completed","workflowId":workflow_id,"from":key,"to":pm_key,"agent":key,"status":"done","location":"talk","task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
+                await self._publish_company_activity({"type":"followup_completed","workflowId":workflow_id,"from":key,"to":pm_key,"agent":key,"status":"done","location":"visit:pm","task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
                 await self.send(chat_id, f"✅ {key} แก้ follow-up เสร็จแล้ว ส่งกลับ PM")
                 asyncio.create_task(self._restore_company_agent_idle(workflow_id, key, task_for_role, 12))
 
             reviewer_key = "techlead" if "techlead" in worker_chain else worker_chain[-1] if worker_chain else pm_key
             final_prompt = self._company_role_prompt(reviewer_key, self._bot_channel_prompt({"persona": reviewer_key}) or f"You are {reviewer_key}.")
             combined_outputs = "\\n\\n".join(f"[{step.get('persona')}] task={step.get('task','')}\\n{step.get('output','')}" for step in steps)
-            await self._publish_company_activity({"type":"review_started","workflowId":workflow_id,"from":"team","to":reviewer_key,"agent":reviewer_key,"status":"working","task":task_text,"summary":f"{reviewer_key} started final review"})
+            await self._publish_company_activity({"type":"review_started","workflowId":workflow_id,"from":"team","to":reviewer_key,"agent":reviewer_key,"status":"working","location":"visit:pm","task":task_text,"summary":f"{reviewer_key} started final review with PM"})
             await self.send(chat_id, f"▶️ {reviewer_key} เริ่ม final review")
-            final_message = f"Original user request:\\n{task_text}\\n\\nTeam outputs:\\n{combined_outputs}\\n\\nCreate the final answer to the Pinto user. Be practical, consolidated, and avoid repeating internal chatter."
+            final_message = f"Original user request:\\n{task_text}\\n\\nTeam outputs:\\n{combined_outputs}\\n\\nCreate the final answer to the Pinto user. Be practical, consolidated, and avoid repeating internal chatter. If the user asked to run/show/preview/deploy, do not claim it is running or deployed unless team outputs contain a real preview URL (workers.dev, pages.dev, trycloudflare.com, localhost.run). If no real preview URL exists, say what is ready and what remains needed to run/host it."
             await self.send(chat_id, "✅ Tech Lead กำลังสรุป final")
             handoff = await self._run_persona_turn(final_prompt, final_message)
             await self._stream_company_message(workflow_id=workflow_id, agent=reviewer_key, from_agent=reviewer_key, to_agent="pinto", task=task_text, text=handoff)
