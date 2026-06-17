@@ -655,11 +655,21 @@ if 'async def _run_company_workflow(' not in s:
                 persona_cfg = personas.get(key) if isinstance(personas, dict) else None
                 persona_cfg = persona_cfg if isinstance(persona_cfg, dict) else {}
                 prompt = self._bot_channel_prompt({"persona": key}) or f"You are {key}."
-                user_message = (
-                    f"Company workflow task:\\n{task_text}\\n\\n"
-                    f"Current handoff/input for persona '{key}':\\n{handoff}\\n\\n"
-                    "Return concise output plus any explicit handoff notes for the next persona."
+                prior_outputs = "\\n\\n".join(
+                    f"[{step['persona']}]\\n{step['output']}" for step in steps[-3:]
                 )
+                if steps:
+                    user_message = (
+                        f"Original user request (context only, do not restart from scratch):\\n{task_text}\\n\\n"
+                        f"Previous role handoff you must build on:\\n{handoff}\\n\\n"
+                        f"Recent prior outputs:\\n{prior_outputs}\\n\\n"
+                        f"Your role is '{key}'. Add only your role-specific contribution, decisions, risks, and handoff for the next role. Do not repeat the same plan unless needed."
+                    )
+                else:
+                    user_message = (
+                        f"User request for proton company workflow:\\n{task_text}\\n\\n"
+                        f"Your role is '{key}'. Produce the first role-specific output and a clear handoff for the next role."
+                    )
                 reply = await self._run_persona_turn(prompt, user_message)
                 steps.append({"persona": key, "output": reply})
                 handoff = reply
@@ -724,11 +734,21 @@ activity_old = '''            handoff = task_text
                 persona_cfg = personas.get(key) if isinstance(personas, dict) else None
                 persona_cfg = persona_cfg if isinstance(persona_cfg, dict) else {}
                 prompt = self._bot_channel_prompt({"persona": key}) or f"You are {key}."
-                user_message = (
-                    f"Company workflow task:\\n{task_text}\\n\\n"
-                    f"Current handoff/input for persona '{key}':\\n{handoff}\\n\\n"
-                    "Return concise output plus any explicit handoff notes for the next persona."
+                prior_outputs = "\\n\\n".join(
+                    f"[{step['persona']}]\\n{step['output']}" for step in steps[-3:]
                 )
+                if steps:
+                    user_message = (
+                        f"Original user request (context only, do not restart from scratch):\\n{task_text}\\n\\n"
+                        f"Previous role handoff you must build on:\\n{handoff}\\n\\n"
+                        f"Recent prior outputs:\\n{prior_outputs}\\n\\n"
+                        f"Your role is '{key}'. Add only your role-specific contribution, decisions, risks, and handoff for the next role. Do not repeat the same plan unless needed."
+                    )
+                else:
+                    user_message = (
+                        f"User request for proton company workflow:\\n{task_text}\\n\\n"
+                        f"Your role is '{key}'. Produce the first role-specific output and a clear handoff for the next role."
+                    )
                 reply = await self._run_persona_turn(prompt, user_message)
                 steps.append({"persona": key, "output": reply})
                 handoff = reply
@@ -751,13 +771,23 @@ activity_new = '''            handoff = task_text
                     "agent": key,
                     "status": "working",
                     "task": task_text,
-                    "summary": f"{key} started: {task_text[:180]}",
+                    "summary": f"{key} started step {len(steps)+1}/{len(chain)}",
                 })
-                user_message = (
-                    f"Company workflow task:\\n{task_text}\\n\\n"
-                    f"Current handoff/input for persona '{key}':\\n{handoff}\\n\\n"
-                    "Return concise output plus any explicit handoff notes for the next persona."
+                prior_outputs = "\\n\\n".join(
+                    f"[{step['persona']}]\\n{step['output']}" for step in steps[-3:]
                 )
+                if steps:
+                    user_message = (
+                        f"Original user request (context only, do not restart from scratch):\\n{task_text}\\n\\n"
+                        f"Previous role handoff you must build on:\\n{handoff}\\n\\n"
+                        f"Recent prior outputs:\\n{prior_outputs}\\n\\n"
+                        f"Your role is '{key}'. Add only your role-specific contribution, decisions, risks, and handoff for the next role. Do not repeat the same plan unless needed."
+                    )
+                else:
+                    user_message = (
+                        f"User request for proton company workflow:\\n{task_text}\\n\\n"
+                        f"Your role is '{key}'. Produce the first role-specific output and a clear handoff for the next role."
+                    )
                 reply = await self._run_persona_turn(prompt, user_message)
                 steps.append({"persona": key, "output": reply})
                 await self._publish_company_activity({
