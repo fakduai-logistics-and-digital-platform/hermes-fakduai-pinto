@@ -893,7 +893,7 @@ activity_new = '''            handoff = task_text
                     f"PM plan and dispatch:\\n{pm_reply}\\n\\n"
                     f"Your assigned task from PM:\\n{task_for_role}\\n\\n"
                     f"Recent peer outputs you may coordinate with:\\n{peer_context}\\n\\n"
-                    f"Your role is '{key}'. Do only your assigned role-specific work. Talk to/hand off to the next relevant teammate when useful. Do not redo PM planning."
+                    f"Your role is '{key}'. Do only your assigned role-specific work. Complete this todo checklist step by step before handoff:\n" + "\n".join(f"- [ ] {todo}" for todo in role_todos) + "\nTalk to/hand off to the next relevant teammate when useful. Do not redo PM planning."
                 )
                 reply = await self._run_persona_turn(prompt, user_message)
                 worker_outputs.append({"persona": key, "output": reply, "task": task_for_role})
@@ -1133,7 +1133,9 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 task_for_role = dispatch.get(key) or f"Build on PM plan for your {key} role."
                 prompt = self._company_role_prompt(key, self._bot_channel_prompt({"persona": key}) or f"You are {key}.")
                 from_agent = pm_key if idx == 1 else worker_chain[idx - 2]
-                await self._publish_company_activity({"type":"task_dispatched","workflowId":workflow_id,"from":from_agent,"to":key,"agent":key,"status":"working","task":task_for_role,"summary":f"{from_agent} -> {key}: {task_for_role[:180]}"})
+                role_todos = self._build_company_role_todos(key, task_for_role)
+                await self._publish_company_activity({"type":"task_dispatched","workflowId":workflow_id,"from":from_agent,"to":key,"agent":key,"status":"working","task":task_for_role,"summary":f"{from_agent} -> {key}: {task_for_role[:180]}","todos":role_todos,"todoIndex":1,"todoTotal":len(role_todos)})
+                await self._publish_company_activity({"type":"todo_started","workflowId":workflow_id,"from":key,"to":key,"agent":key,"status":"working","task":task_for_role,"summary":f"{key} todo 1/{len(role_todos)}: {role_todos[0] if role_todos else 'start'}","todos":role_todos,"todoIndex":1,"todoTotal":len(role_todos)})
                 await self.send(chat_id, f"▶️ {key} เริ่มทำงาน")
                 prior_outputs = "\\n\\n".join(f"[{item['persona']}]\\n{item['output']}" for item in worker_outputs[-3:])
                 peer_context = prior_outputs or pm_reply
@@ -1142,7 +1144,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                     f"PM plan and dispatch:\\n{pm_reply}\\n\\n"
                     f"Your assigned task from PM:\\n{task_for_role}\\n\\n"
                     f"Recent peer outputs you may coordinate with:\\n{peer_context}\\n\\n"
-                    f"Your role is '{key}'. Do only your assigned role-specific work. Talk to/hand off to the next relevant teammate when useful. Do not redo PM planning."
+                    f"Your role is '{key}'. Do only your assigned role-specific work. Complete this todo checklist step by step before handoff:\n" + "\n".join(f"- [ ] {todo}" for todo in role_todos) + "\nTalk to/hand off to the next relevant teammate when useful. Do not redo PM planning."
                 )
                 reply = await self._run_persona_turn(prompt, user_message)
                 worker_outputs.append({"persona": key, "output": reply, "task": task_for_role})
@@ -1150,9 +1152,10 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 next_to = worker_chain[idx] if idx < len(worker_chain) else "techlead"
                 await self._stream_company_message(workflow_id=workflow_id, agent=key, from_agent=key, to_agent=next_to, task=task_for_role, text=reply)
                 await self._send_preview_urls(chat_id, reply, preview_urls_sent)
-                await self._publish_company_activity({"type":"peer_handoff","workflowId":workflow_id,"from":key,"to":next_to,"agent":key,"status":"done","task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
+                await self._publish_company_activity({"type":"todo_completed","workflowId":workflow_id,"from":key,"to":key,"agent":key,"status":"done","task":task_for_role,"summary":f"{key} completed {len(role_todos)}/{len(role_todos)} todos","todos":role_todos,"todoIndex":len(role_todos),"todoTotal":len(role_todos),"message":reply[:1200]})
+                await self._publish_company_activity({"type":"peer_handoff","workflowId":workflow_id,"from":key,"to":next_to,"agent":key,"status":"done","location":"talk","task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
+                await self._publish_company_activity({"type":"submitted_to_pm","workflowId":workflow_id,"from":key,"to":pm_key,"agent":key,"status":"done","location":"talk","task":task_for_role,"summary":f"{key} submitted work to PM and is waiting for feedback","message":reply[:1200]})
                 await self.send(chat_id, f"✅ {key} เสร็จแล้ว ส่งต่อให้ {next_to}")
-                asyncio.create_task(self._restore_company_agent_idle(workflow_id, key, task_for_role, 12))
 
             await self.send(chat_id, "✅ ทีมทำงานรอบแรกครบแล้ว กำลังให้ PM review")
             team_outputs = "\\n\\n".join(f"[{step.get('persona')}] task={step.get('task','')}\\n{step.get('output','')}" for step in steps)
@@ -1172,24 +1175,29 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             await self._publish_company_activity({"type":"pm_review_completed","workflowId":workflow_id,"from":pm_key,"to":"team","agent":pm_key,"status":"done","task":task_text,"summary":pm_review[:240],"message":pm_review[:2000]})
             await self.send(chat_id, f"✅ {pm_key} review เสร็จแล้ว")
             asyncio.create_task(self._restore_company_agent_idle(workflow_id, pm_key, task_text, 12))
+            for member in worker_chain:
+                await self._publish_company_activity({"type":"pm_feedback_completed","workflowId":workflow_id,"from":pm_key,"to":member,"agent":member,"status":"idle","location":"desk","task":task_text,"summary":f"PM feedback complete for {member}; return to desk"})
             followups = self._extract_pm_tasks(pm_review, worker_chain)
             if followups:
                 await self.send(chat_id, f"⚠️ PM เจอ follow-up {len(followups)} งาน กำลังส่งกลับทีมที่เกี่ยวข้อง")
             for key, task_for_role in followups.items():
                 prompt = self._company_role_prompt(key, self._bot_channel_prompt({"persona": key}) or f"You are {key}.")
-                await self._publish_company_activity({"type":"followup_dispatched","workflowId":workflow_id,"from":pm_key,"to":key,"agent":key,"status":"working","task":task_for_role,"summary":f"{pm_key} follow-up -> {key}: {task_for_role[:180]}"})
+                role_todos = self._build_company_role_todos(key, task_for_role)
+                await self._publish_company_activity({"type":"followup_dispatched","workflowId":workflow_id,"from":pm_key,"to":key,"agent":key,"status":"working","task":task_for_role,"summary":f"{pm_key} follow-up -> {key}: {task_for_role[:180]}","todos":role_todos,"todoIndex":1,"todoTotal":len(role_todos)})
+                await self._publish_company_activity({"type":"todo_started","workflowId":workflow_id,"from":key,"to":key,"agent":key,"status":"working","task":task_for_role,"summary":f"{key} follow-up todo 1/{len(role_todos)}: {role_todos[0] if role_todos else 'start'}","todos":role_todos,"todoIndex":1,"todoTotal":len(role_todos)})
                 await self.send(chat_id, f"🔁 {key} กลับไปแก้ follow-up")
                 follow_message = (
                     f"Original user request:\\n{task_text}\\n\\n"
                     f"Team outputs and PM review:\\n{team_outputs}\\n\\nPM review:\\n{pm_review}\\n\\n"
                     f"Your follow-up task from PM:\\n{task_for_role}\\n\\n"
-                    f"Your role is '{key}'. Address the issue directly. If this came from QA, respond with fix/decision and handoff back to QA/PM."
+                    f"Your role is '{key}'. Address the issue directly. Complete this todo checklist step by step before handoff:\n" + "\n".join(f"- [ ] {todo}" for todo in role_todos) + "\nIf this came from QA, respond with fix/decision and handoff back to QA/PM."
                 )
                 reply = await self._run_persona_turn(prompt, follow_message)
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
                 await self._stream_company_message(workflow_id=workflow_id, agent=key, from_agent=key, to_agent=pm_key, task=task_for_role, text=reply)
                 await self._send_preview_urls(chat_id, reply, preview_urls_sent)
-                await self._publish_company_activity({"type":"followup_completed","workflowId":workflow_id,"from":key,"to":pm_key,"agent":key,"status":"done","task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
+                await self._publish_company_activity({"type":"todo_completed","workflowId":workflow_id,"from":key,"to":key,"agent":key,"status":"done","task":task_for_role,"summary":f"{key} completed {len(role_todos)}/{len(role_todos)} follow-up todos","todos":role_todos,"todoIndex":len(role_todos),"todoTotal":len(role_todos),"message":reply[:1200]})
+                await self._publish_company_activity({"type":"followup_completed","workflowId":workflow_id,"from":key,"to":pm_key,"agent":key,"status":"done","location":"talk","task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
                 await self.send(chat_id, f"✅ {key} แก้ follow-up เสร็จแล้ว ส่งกลับ PM")
                 asyncio.create_task(self._restore_company_agent_idle(workflow_id, key, task_for_role, 12))
 
@@ -1211,6 +1219,20 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 await self.send(chat_id, "✖️ company workflow ล้มเหลว ดู log ฝั่ง Hermes Gateway")
             except Exception:
                 pass
+
+    def _build_company_role_todos(self, role_key: str, task_text: str) -> list:
+        role = str(role_key or "agent").strip().lower()
+        base = str(task_text or "assigned task").strip()[:220]
+        presets = {
+            "designer": ["Extract UX goals and user journey", "Define layout, visual direction, and responsive states", "Hand off concrete UI guidance to frontend"],
+            "frontend": ["Review design/requirements", "Implement UI and interactions", "Run local/hosted preview and report URL if available"],
+            "backend": ["Review runtime/hosting requirements", "Implement server/static serving or deploy packaging", "Validate preview command and report URL/path"],
+            "qa": ["Derive acceptance checks", "Test happy paths, edge cases, responsive behavior, and preview URL", "Report pass/fail with evidence and follow-up items"],
+            "techlead": ["Review outputs against requirements", "Check risks, gaps, and integration", "Produce final user-facing summary with path/link/evidence"],
+            "pm": ["Convert client request into requirements", "Split role-specific tasks", "Merge outputs and new requirements into follow-up plan"],
+        }
+        todos = presets.get(role, ["Understand assigned task", "Produce role-specific output", "Hand off result with evidence"])
+        return [f"{item}: {base}" if i == 0 else item for i, item in enumerate(todos)]
 
     def _company_requirement_path(self, chat_id: str):
         import os
