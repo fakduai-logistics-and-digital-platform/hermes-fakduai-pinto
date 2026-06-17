@@ -893,7 +893,7 @@ activity_new = '''            handoff = task_text
                     f"PM plan and dispatch:\\n{pm_reply}\\n\\n"
                     f"Your assigned task from PM:\\n{task_for_role}\\n\\n"
                     f"Recent peer outputs you may coordinate with:\\n{peer_context}\\n\\n"
-                    f"Your role is '{key}'. Do only your assigned role-specific work. Complete this todo checklist step by step before handoff:\n" + "\n".join(f"- [ ] {todo}" for todo in role_todos) + "\nTalk to/hand off to the next relevant teammate when useful. Do not redo PM planning."
+                    f"Your role is '{key}'. Do only your assigned role-specific work. Complete this todo checklist step by step before handoff:\\n" + "\\n".join(f"- [ ] {todo}" for todo in role_todos) + "\\nTalk to/hand off to the next relevant teammate when useful. Do not redo PM planning."
                 )
                 reply = await self._run_persona_turn(prompt, user_message)
                 worker_outputs.append({"persona": key, "output": reply, "task": task_for_role})
@@ -1144,7 +1144,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                     f"PM plan and dispatch:\\n{pm_reply}\\n\\n"
                     f"Your assigned task from PM:\\n{task_for_role}\\n\\n"
                     f"Recent peer outputs you may coordinate with:\\n{peer_context}\\n\\n"
-                    f"Your role is '{key}'. Do only your assigned role-specific work. Complete this todo checklist step by step before handoff:\n" + "\n".join(f"- [ ] {todo}" for todo in role_todos) + "\nTalk to/hand off to the next relevant teammate when useful. Do not redo PM planning."
+                    f"Your role is '{key}'. Do only your assigned role-specific work. Complete this todo checklist step by step before handoff:\\n" + "\\n".join(f"- [ ] {todo}" for todo in role_todos) + "\\nTalk to/hand off to the next relevant teammate when useful. Do not redo PM planning."
                 )
                 reply = await self._run_persona_turn(prompt, user_message)
                 worker_outputs.append({"persona": key, "output": reply, "task": task_for_role})
@@ -1190,7 +1190,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                     f"Original user request:\\n{task_text}\\n\\n"
                     f"Team outputs and PM review:\\n{team_outputs}\\n\\nPM review:\\n{pm_review}\\n\\n"
                     f"Your follow-up task from PM:\\n{task_for_role}\\n\\n"
-                    f"Your role is '{key}'. Address the issue directly. Complete this todo checklist step by step before handoff:\n" + "\n".join(f"- [ ] {todo}" for todo in role_todos) + "\nIf this came from QA, respond with fix/decision and handoff back to QA/PM."
+                    f"Your role is '{key}'. Address the issue directly. Complete this todo checklist step by step before handoff:\\n" + "\\n".join(f"- [ ] {todo}" for todo in role_todos) + "\\nIf this came from QA, respond with fix/decision and handoff back to QA/PM."
                 )
                 reply = await self._run_persona_turn(prompt, follow_message)
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
