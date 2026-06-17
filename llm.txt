@@ -78,6 +78,9 @@ HERMES_DASHBOARD_PORT=9119
 Persistent Pinto bot ID behavior:
 - `scripts/bootstrap-hermes-config.py` treats `hermes-config/config.yaml` `platforms.pinto.extra.botId` as the durable source of truth.
 - `PINTO_BOT_ID` from process env or `/root/.hermes/.env` is only a fallback when `config.yaml` has no botId yet.
+- Extra Pinto bots are configured under `platforms.pinto.extra.bots` and can point to persona keys under `platforms.pinto.extra.pintoAgents`.
+- Persona routing is local Hermes-Pinto behavior: `bots.<bot_id>.persona` resolves to `pintoAgents.<key>.channelPrompt`. This is not Hermes native subagent registry.
+- All Pinto bots share one webhook URL and webhook secret; only `bot_id` and optional `persona` differ.
 - Do not commit real bot IDs or secrets; `hermes-config/` and `.env` are ignored.
 
 AI provider config:

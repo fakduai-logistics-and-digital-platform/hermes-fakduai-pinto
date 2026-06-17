@@ -180,6 +180,26 @@ platforms:
 
 If `.env` and `hermes-config/config.yaml` differ later, `config.yaml` wins. This prevents an old `.env` from overwriting the bot ID after container restart.
 
+Optional: add more Pinto bots with persona routing in `hermes-config/config.yaml`:
+
+```yaml
+platforms:
+  pinto:
+    extra:
+      botId: your_primary_pinto_bot_id
+      pintoAgents:
+        thai-poet:
+          name: นักแต่งกลอน
+          channelPrompt: |
+            คุณคือนักแต่งกลอนไทย ตอบเป็นภาษาไทยอย่างสละสลวย
+      bots:
+        your_extra_pinto_bot_id:
+          name: นักแต่งกลอน
+          persona: thai-poet
+```
+
+All Pinto bots share the same webhook URL and webhook secret. Each extra bot uses its own `bot_id` and optional `persona` key that resolves to `pintoAgents.<key>.channelPrompt`.
+
 ---
 
 # Step 4: Generate Hermes API server key

@@ -539,5 +539,67 @@ elif 'async def send_typing(self, chat_id:' in s:
 else:
     raise SystemExit('Expected Pinto send_typing block not found')
 
+# Resolve per-bot prompts through a local persona registry:
+#
+#   platforms.pinto.extra.pintoAgents:
+#     thai-poet:
+#       name: นักแต่งกลอน
+#       channelPrompt: ...
+#   platforms.pinto.extra.bots:
+#     <bot_id>:
+#       persona: thai-poet
+#
+# Backward-compatible fallback keeps bot-level channelPrompt/role/name working.
+if 'self._persona_configs = extra.get("pintoAgents")' not in s:
+    init_marker = '        self._bot_configs = extra.get("bots") if isinstance(extra.get("bots"), dict) else {}\n'
+    if init_marker in s:
+        s = s.replace(
+            init_marker,
+            init_marker + '        self._persona_configs = extra.get("pintoAgents") if isinstance(extra.get("pintoAgents"), dict) else {}\n',
+            1,
+        )
+        patched = True
+    else:
+        raise SystemExit('Expected Pinto bot configs init marker not found')
+
+old_prompt = '''    def _bot_channel_prompt(self, bot_config: dict) -> Optional[str]:
+        prompt = bot_config.get("channelPrompt") or bot_config.get("prompt")
+        role = bot_config.get("role") or bot_config.get("name")
+        if prompt:
+            return str(prompt).strip()
+        if role:
+            return f"You are {role}. Stay in this role for this chat."
+        return None
+'''
+new_prompt = '''    def _bot_channel_prompt(self, bot_config: dict) -> Optional[str]:
+        persona_key = (
+            bot_config.get("persona")
+            or bot_config.get("personaKey")
+            or bot_config.get("agent_id")
+            or bot_config.get("agentId")
+        )
+        persona_config = None
+        if persona_key and isinstance(getattr(self, "_persona_configs", None), dict):
+            candidate = self._persona_configs.get(str(persona_key))
+            if isinstance(candidate, dict):
+                persona_config = candidate
+
+        source = persona_config or bot_config
+        prompt = source.get("channelPrompt") or source.get("prompt") or source.get("systemPrompt")
+        role = source.get("role") or source.get("name") or persona_key
+        if prompt:
+            return str(prompt).strip()
+        if role:
+            return f"You are {role}. Stay in this role for this chat."
+        return None
+'''
+if old_prompt in s:
+    s = s.replace(old_prompt, new_prompt)
+    patched = True
+elif 'bot_config.get("persona")' in s and 'self._persona_configs' in s:
+    print('Pinto adapter persona registry prompt patch already applied')
+else:
+    raise SystemExit('Expected Pinto _bot_channel_prompt block not found')
+
 p.write_text(s, encoding='utf-8')
 print('Patched Pinto adapter for Hermes 0.16 compatibility' if patched else 'Pinto adapter already patched')

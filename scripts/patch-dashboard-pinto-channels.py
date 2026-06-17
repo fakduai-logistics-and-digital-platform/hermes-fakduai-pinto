@@ -2,14 +2,14 @@
 """Patch Hermes Dashboard Channels API for Pinto multi-bot cards.
 
 Shows entries in platforms.pinto.extra.bots as editable Pinto cards that use the
-same developer-console fields as the primary Pinto card, plus Agent ID.
+same developer-console fields as the primary Pinto card, plus a Persona Key that
+resolves against platforms.pinto.extra.pintoAgents (a local persona registry).
 """
 from pathlib import Path
 
 p = Path('/usr/local/lib/python3.11/site-packages/hermes_cli/web_server.py')
 s = p.read_text(encoding='utf-8')
 
-# Extra request model.
 model_marker = '''class MessagingPlatformUpdate(BaseModel):
     enabled: Optional[bool] = None
     env: Dict[str, str] = {}
@@ -18,12 +18,19 @@ model_marker = '''class MessagingPlatformUpdate(BaseModel):
 '''
 model_insert = model_marker + '''class PintoBotUpdate(BaseModel):
     bot_id: Optional[str] = None
-    agent_id: Optional[str] = None
+    persona: Optional[str] = None
     name: Optional[str] = None
     role: Optional[str] = None
     description: Optional[str] = None
     channelPrompt: Optional[str] = None
     enabled: Optional[bool] = None
+
+
+class PintoPersonaUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    description: Optional[str] = None
+    channelPrompt: Optional[str] = None
 
 '''
 if 'class PintoBotUpdate(BaseModel):' not in s:
@@ -50,11 +57,18 @@ helper_insert = '''def _catalog_lookup(platform_id: str) -> dict[str, Any] | Non
             "name": "Pinto bot",
             "description": "Additional Pinto bot from platforms.pinto.extra.bots",
             "docs_url": "",
-            "env_vars": ("PINTO_API_URL", "PINTO_BOT_ID", "PINTO_WEBHOOK_SECRET", "PINTO_WEBHOOK_URL", "PINTO_AGENT_ID"),
+            "env_vars": ("PINTO_API_URL", "PINTO_BOT_ID", "PINTO_WEBHOOK_SECRET", "PINTO_WEBHOOK_URL", "PINTO_PERSONA_KEY"),
             "required_env": ("PINTO_API_URL", "PINTO_BOT_ID", "PINTO_WEBHOOK_SECRET", "PINTO_WEBHOOK_URL"),
             "read_only": False,
         }
     return None
+
+
+def _pinto_personas_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Return platforms.pinto.extra.pintoAgents, the local persona registry."""
+    extra = (config.get("platforms", {}).get("pinto", {}).get("extra", {}))
+    personas = extra.get("pintoAgents") if isinstance(extra, dict) else None
+    return personas if isinstance(personas, dict) else {}
 
 
 def _pinto_extra_bot_entries() -> list[dict[str, Any]]:
@@ -65,6 +79,7 @@ def _pinto_extra_bot_entries() -> list[dict[str, Any]]:
         bots = extra.get("bots") if isinstance(extra, dict) else None
         if not isinstance(bots, dict):
             return []
+        personas = _pinto_personas_config(config)
     except Exception:
         _log.debug("could not load Pinto extra bots", exc_info=True)
         return []
@@ -74,20 +89,26 @@ def _pinto_extra_bot_entries() -> list[dict[str, Any]]:
         if not bot_id:
             continue
         cfg = bot_cfg if isinstance(bot_cfg, dict) else {}
-        agent_id = str(cfg.get("agent_id") or cfg.get("agentId") or cfg.get("role") or cfg.get("name") or bot_id)
-        label = str(cfg.get("name") or agent_id or bot_id)
-        description = str(cfg.get("description") or f"Agent ID: {agent_id}")
+        persona_key = str(cfg.get("persona") or cfg.get("personaKey") or "") or None
+        persona_cfg = personas.get(persona_key) if persona_key else None
+        persona_cfg = persona_cfg if isinstance(persona_cfg, dict) else {}
+        label = str(cfg.get("name") or persona_cfg.get("name") or persona_key or bot_id)
+        description = str(
+            cfg.get("description")
+            or persona_cfg.get("description")
+            or (f"Persona: {persona_key}" if persona_key else "No persona assigned")
+        )
         entries.append({
             "id": f"pinto:{bot_id}",
             "name": f"Pinto / {label}",
             "description": f"{description} — bot_id: {bot_id}",
             "docs_url": "",
-            "env_vars": ("PINTO_API_URL", "PINTO_BOT_ID", "PINTO_WEBHOOK_SECRET", "PINTO_WEBHOOK_URL", "PINTO_AGENT_ID"),
+            "env_vars": ("PINTO_API_URL", "PINTO_BOT_ID", "PINTO_WEBHOOK_SECRET", "PINTO_WEBHOOK_URL", "PINTO_PERSONA_KEY"),
             "required_env": ("PINTO_API_URL", "PINTO_BOT_ID", "PINTO_WEBHOOK_SECRET", "PINTO_WEBHOOK_URL"),
             "read_only": False,
             "parent_platform": "pinto",
             "bot_id": str(bot_id),
-            "agent_id": agent_id,
+            "persona_key": persona_key,
         })
     return entries
 
@@ -140,29 +161,29 @@ payload_insert = '''    platform_id = entry["id"]
             "PINTO_WEBHOOK_SECRET": env_on_disk.get("PINTO_WEBHOOK_SECRET") or os.getenv("PINTO_WEBHOOK_SECRET", ""),
             "PINTO_WEBHOOK_URL": env_on_disk.get("PINTO_WEBHOOK_URL") or os.getenv("PINTO_WEBHOOK_URL", ""),
             "PINTO_BOT_ID": entry.get("bot_id") or "",
-            "PINTO_AGENT_ID": entry.get("agent_id") or "",
+            "PINTO_PERSONA_KEY": entry.get("persona_key") or "",
         }
         prompts = {
             "PINTO_API_URL": ("Pinto API URL", "Pinto API URL. Dev: https://api-dev.pinto-app.com, Prod: https://api.pinto-app.com"),
             "PINTO_BOT_ID": ("Pinto Bot ID", "Bot ID from Pinto Developer Console"),
             "PINTO_WEBHOOK_SECRET": ("Developer Console Webhook Secret", "Copy this secret into Pinto Developer Console. Shared by all Pinto bots."),
             "PINTO_WEBHOOK_URL": ("Developer Console Webhook URL", "Copy this URL into Pinto Developer Console > Bot Webhook URL. Shared by all Pinto bots."),
-            "PINTO_AGENT_ID": ("Agent ID", "Hermes agent/persona routing ID for this Pinto bot"),
+            "PINTO_PERSONA_KEY": ("Persona Key", "Local persona key from platforms.pinto.extra.pintoAgents. Controls this bot's channelPrompt."),
         }
         env_vars = []
-        for key in ("PINTO_API_URL", "PINTO_BOT_ID", "PINTO_WEBHOOK_SECRET", "PINTO_WEBHOOK_URL", "PINTO_AGENT_ID"):
+        for key in ("PINTO_API_URL", "PINTO_BOT_ID", "PINTO_WEBHOOK_SECRET", "PINTO_WEBHOOK_URL", "PINTO_PERSONA_KEY"):
             value = shared.get(key, "")
             prompt, description = prompts[key]
             env_vars.append({
                 "key": key,
-                "required": key != "PINTO_AGENT_ID",
+                "required": key not in ("PINTO_PERSONA_KEY",),
                 "is_set": bool(value),
                 "redacted_value": value or None,
                 "description": description,
                 "prompt": prompt,
                 "url": None,
                 "is_password": False,
-                "advanced": key == "PINTO_AGENT_ID",
+                "advanced": key == "PINTO_PERSONA_KEY",
             })
         return {
             "id": platform_id,
@@ -181,7 +202,7 @@ payload_insert = '''    platform_id = entry["id"]
             "read_only": False,
             "parent_platform": "pinto",
             "bot_id": entry.get("bot_id"),
-            "agent_id": entry.get("agent_id"),
+            "persona_key": entry.get("persona_key"),
         }
 
     runtime_platform = (
@@ -191,7 +212,7 @@ payload_insert = '''    platform_id = entry["id"]
     )
     env_vars = []
 '''
-if '"PINTO_AGENT_ID": ("Agent ID"' not in s:
+if '"PINTO_PERSONA_KEY": ("Persona Key"' not in s:
     if payload_marker not in s:
         raise SystemExit('Expected _messaging_platform_payload header not found')
     s = s.replace(payload_marker, payload_insert)
@@ -251,16 +272,43 @@ endpoints_insert = '''def _pinto_bots_config(config: dict[str, Any]) -> dict[str
     return bots
 
 
+def _pinto_personas_mutable(config: dict[str, Any]) -> dict[str, Any]:
+    platforms = config.setdefault("platforms", {})
+    if not isinstance(platforms, dict):
+        platforms = {}; config["platforms"] = platforms
+    pinto = platforms.setdefault("pinto", {})
+    if not isinstance(pinto, dict):
+        pinto = {}; platforms["pinto"] = pinto
+    extra = pinto.setdefault("extra", {})
+    if not isinstance(extra, dict):
+        extra = {}; pinto["extra"] = extra
+    personas = extra.setdefault("pintoAgents", {})
+    if not isinstance(personas, dict):
+        personas = {}; extra["pintoAgents"] = personas
+    return personas
+
+
 def _pinto_bot_public(bot_id: str, cfg: Any) -> dict[str, Any]:
     data = cfg if isinstance(cfg, dict) else {}
     return {
         "bot_id": bot_id,
-        "agent_id": data.get("agent_id") or data.get("agentId"),
+        "persona": data.get("persona") or data.get("personaKey"),
         "name": data.get("name"),
         "role": data.get("role"),
         "description": data.get("description"),
         "channelPrompt": data.get("channelPrompt"),
         "enabled": data.get("enabled", True),
+    }
+
+
+def _pinto_persona_public(key: str, cfg: Any) -> dict[str, Any]:
+    data = cfg if isinstance(cfg, dict) else {}
+    return {
+        "key": key,
+        "name": data.get("name"),
+        "role": data.get("role"),
+        "description": data.get("description"),
+        "channelPrompt": data.get("channelPrompt"),
     }
 
 
@@ -280,7 +328,7 @@ async def upsert_pinto_bot(bot_id: str, body: PintoBotUpdate):
     bots = _pinto_bots_config(config)
     current = bots.get(bot_id, {})
     data = current if isinstance(current, dict) else {}
-    for key in ("agent_id", "name", "role", "description", "channelPrompt", "enabled"):
+    for key in ("persona", "name", "role", "description", "channelPrompt", "enabled"):
         value = getattr(body, key, None)
         if value is not None:
             if isinstance(value, str):
@@ -303,6 +351,46 @@ async def delete_pinto_bot(bot_id: str):
     removed = bots.pop(bot_id)
     save_config(config)
     return {"ok": True, "removed": _pinto_bot_public(bot_id, removed), "needs_restart": True}
+
+
+@app.get("/api/messaging/pinto/personas")
+async def list_pinto_personas():
+    config = load_config()
+    personas = _pinto_personas_config(config)
+    return {"personas": [_pinto_persona_public(key, cfg) for key, cfg in personas.items()]}
+
+
+@app.put("/api/messaging/pinto/personas/{persona_key}")
+async def upsert_pinto_persona(persona_key: str, body: PintoPersonaUpdate):
+    persona_key = persona_key.strip()
+    if not persona_key:
+        raise HTTPException(status_code=400, detail="persona key is required")
+    config = load_config()
+    personas = _pinto_personas_mutable(config)
+    current = personas.get(persona_key, {})
+    data = current if isinstance(current, dict) else {}
+    for key in ("name", "role", "description", "channelPrompt"):
+        value = getattr(body, key, None)
+        if value is not None:
+            value = value.strip()
+            if value:
+                data[key] = value
+            else:
+                data.pop(key, None)
+    personas[persona_key] = data
+    save_config(config)
+    return {"ok": True, "persona": _pinto_persona_public(persona_key, data), "needs_restart": True}
+
+
+@app.delete("/api/messaging/pinto/personas/{persona_key}")
+async def delete_pinto_persona(persona_key: str):
+    config = load_config()
+    personas = _pinto_personas_mutable(config)
+    if persona_key not in personas:
+        raise HTTPException(status_code=404, detail=f"Unknown Pinto persona: {persona_key}")
+    removed = personas.pop(persona_key)
+    save_config(config)
+    return {"ok": True, "removed": _pinto_persona_public(persona_key, removed), "needs_restart": True}
 
 
 @app.put("/api/messaging/platforms/{platform_id}")
@@ -334,14 +422,13 @@ update_insert = '''    if not entry:
         bots = _pinto_bots_config(config)
         current = bots.pop(old_bot_id, {}) if old_bot_id in bots else {}
         data = current if isinstance(current, dict) else {}
-        agent_id = body.env.get("PINTO_AGENT_ID")
-        if agent_id is not None:
-            agent_id = agent_id.strip()
-            if agent_id:
-                data["agent_id"] = agent_id
-                data.setdefault("name", agent_id)
+        persona_key = body.env.get("PINTO_PERSONA_KEY")
+        if persona_key is not None:
+            persona_key = persona_key.strip()
+            if persona_key:
+                data["persona"] = persona_key
             else:
-                data.pop("agent_id", None)
+                data.pop("persona", None)
         if body.enabled is not None:
             data["enabled"] = body.enabled
         bots[new_bot_id] = data
@@ -362,4 +449,4 @@ s = s.replace('("PINTO_WEBHOOK_URL", "PINTO_WEBHOOK_SECRET")', '("PINTO_API_URL"
 s = s.replace('key == "PINTO_WEBHOOK_URL"', 'key in ("PINTO_API_URL", "PINTO_BOT_ID", "PINTO_WEBHOOK_URL")')
 
 p.write_text(s, encoding='utf-8')
-print('Patched Dashboard Channels API for editable Pinto bot cards')
+print('Patched Dashboard Channels API for editable Pinto bot + persona cards')
