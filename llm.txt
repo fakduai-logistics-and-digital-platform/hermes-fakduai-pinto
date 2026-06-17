@@ -83,6 +83,18 @@ Persistent Pinto bot ID behavior:
 - All Pinto bots share one webhook URL and webhook secret; only `bot_id` and optional `persona` differ.
 - Do not commit real bot IDs or secrets; `hermes-config/` and `.env` are ignored.
 
+Local Hermes-only multi-agent handoff (no OpenClaw involved):
+- `scripts/hermes-company-run.py <task> [--agents key1 key2 ...]` calls Hermes
+  `/v1/responses` once per persona key, sequentially, feeding each reply as
+  the next persona's input (real handoff chain, not just persona switching).
+- Persona keys and prompts come from `platforms.pinto.extra.pintoAgents`.
+- Default chain order can be set at `platforms.pinto.extra.companyWorkflows.default`.
+- Needs `API_SERVER_KEY` from `.env`/`hermes-config/.env` and the gateway
+  reachable at `http://127.0.0.1:8642` (override with `--api-base`).
+- Run history is written to `hermes-config/company-runs/` (ignored by git).
+- This is a custom layer on top of Hermes; Hermes core has no native
+  persistent agent registry or agent-to-agent tool like OpenClaw.
+
 AI provider config:
 ```env
 OPENAI_API_KEY=your_api_key

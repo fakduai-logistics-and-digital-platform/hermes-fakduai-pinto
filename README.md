@@ -200,6 +200,29 @@ platforms:
 
 All Pinto bots share the same webhook URL and webhook secret. Each extra bot uses its own `bot_id` and optional `persona` key that resolves to `pintoAgents.<key>.channelPrompt`.
 
+Optional: run a local Hermes-only sequential persona handoff workflow (this is
+not OpenClaw, no `~/.openclaw` config is touched):
+
+```bash
+python3 scripts/hermes-company-run.py "Build the customer login flow" \
+  --agents thai-poet thai-poet
+```
+
+Each step's reply becomes the next persona's input. Run history is saved to
+`hermes-config/company-runs/` (ignored by git, local only). Add a default chain
+in `config.yaml`:
+
+```yaml
+platforms:
+  pinto:
+    extra:
+      companyWorkflows:
+        default:
+          - pm
+          - designer
+          - frontend
+```
+
 ---
 
 # Step 4: Generate Hermes API server key
