@@ -1097,6 +1097,9 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             )
             pm_key = chain[0]
             worker_chain = [key for key in chain[1:] if key]
+            meeting_agents = [pm_key] + worker_chain
+            for member in meeting_agents:
+                await self._publish_company_activity({"type":"team_meeting_started","workflowId":workflow_id,"from":"pinto","to":member,"agent":member,"status":"working" if member == pm_key else "idle","location":"meeting","task":task_text,"summary":"PM kickoff meeting: requirement intake and task split"})
 
             pm_prompt = self._company_role_prompt(pm_key, self._bot_channel_prompt({"persona": pm_key}) or f"You are {pm_key}.")
             await self._publish_company_activity({"type":"role_started","workflowId":workflow_id,"from":"pinto","to":pm_key,"agent":pm_key,"status":"working","task":task_text,"summary":f"{pm_key} started planning and dispatch"})
@@ -1117,6 +1120,8 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             await self._publish_company_activity({"type":"role_completed","workflowId":workflow_id,"from":pm_key,"to":"team","agent":pm_key,"status":"done","task":task_text,"summary":pm_reply[:240],"message":pm_reply[:2000]})
             await self.send(chat_id, f"✅ {pm_key} เสร็จแล้ว ส่งงานต่อให้ทีม")
             asyncio.create_task(self._restore_company_agent_idle(workflow_id, pm_key, task_text, 12))
+            for member in meeting_agents:
+                await self._publish_company_activity({"type":"team_meeting_ended","workflowId":workflow_id,"from":pm_key,"to":member,"agent":member,"status":"done" if member == pm_key else "idle","location":"desk","task":task_text,"summary":"PM kickoff meeting ended; agents return to desks"})
 
             dispatch = self._extract_pm_tasks(pm_reply, worker_chain)
             worker_outputs = []
