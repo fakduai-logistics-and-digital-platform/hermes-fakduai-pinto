@@ -1091,6 +1091,9 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             preview_urls_sent = set()
             workflow_id = f"pinto-{chat_id}-{uuid.uuid4().hex[:8]}"
             projects_dir = os.getenv("COMPANY_PROJECTS_DIR", "/company-projects")
+            requirement_ledger = self._load_company_requirement_ledger(chat_id)
+            self._append_company_requirement(chat_id, task_text)
+            requirement_ledger = self._load_company_requirement_ledger(chat_id)
             project_instructions = (
                 f"Generated project files must be written under {projects_dir}/<project-name>. "
                 "Never write generated project files under /root. Use a clear project slug such as proton-landing."
@@ -1106,7 +1109,8 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             await self.send(chat_id, f"▶️ {pm_key} เริ่มวางแผนและแบ่งงาน")
             pm_message = (
                 f"User request for proton company workflow:\\n{task_text}\\n\\n"
-                f"You are '{pm_key}'. Break this into role-specific tasks for these agents: {', '.join(worker_chain)}.\n"
+                f"Recent requirement ledger for this chat:\\n{requirement_ledger}\\n\\n"
+                f"You are '{pm_key}'. Treat the user as a non-technical client. Convert vague intent into concrete goals, assumptions, acceptance criteria, constraints, and role-specific tasks for these agents: {', '.join(worker_chain)}.\n"
                 "If the user asks to run, preview, host, deploy, open, or show the product, route that request directly to frontend and/or backend dev tasks. Do not make the user run it themselves unless credentials or environment are missing. Prefer Cloudflare/Wrangler when authenticated; otherwise use localhost.run via ssh -R 80:localhost:3000 nokey@localhost.run if SSH and a local preview server are available. "
                 "Return concise Thai planning plus a JSON object at the end in this exact shape:\\n"
                 '{"tasks":[{"agent":"designer","task":"..."}],"notes":"..."}\n'
@@ -1156,8 +1160,9 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             await self.send(chat_id, f"▶️ {pm_key} เริ่ม review งานทีม")
             pm_review_message = (
                 f"Original user request:\\n{task_text}\\n\\n"
+                f"Latest requirement ledger for this chat:\\n{self._load_company_requirement_ledger(chat_id)}\\n\\n"
                 f"Team outputs so far:\\n{team_outputs}\\n\\n"
-                f"You are '{pm_key}'. If QA or any teammate found bugs, blockers, missing work, or dependencies, assign follow-up tasks to the right available agents: {', '.join(worker_chain)}.\\n"
+                f"You are '{pm_key}'. Merge teammate outputs with the latest requirement ledger. If new/changed requirements conflict with completed work, preserve useful completed work and assign targeted follow-up tasks to the right available agents: {', '.join(worker_chain)}. If QA or any teammate found bugs, blockers, missing work, or dependencies, assign follow-up tasks too.\\n"
                 "Return brief Thai review plus JSON at the end: {\"tasks\":[{\"agent\":\"backend\",\"task\":\"fix/rework ...\"}],\"notes\":\"...\"}. Return empty tasks if no follow-up needed."
             )
             pm_review = await self._run_persona_turn(pm_prompt, pm_review_message)
@@ -1206,6 +1211,33 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 await self.send(chat_id, "✖️ company workflow ล้มเหลว ดู log ฝั่ง Hermes Gateway")
             except Exception:
                 pass
+
+    def _company_requirement_path(self, chat_id: str):
+        import os
+        from pathlib import Path
+        root = Path(os.getenv("COMPANY_REQUIREMENTS_DIR", "/root/.hermes/company-requirements"))
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(chat_id or "unknown"))[:120]
+        return root / f"{safe}.md"
+
+    def _load_company_requirement_ledger(self, chat_id: str) -> str:
+        try:
+            path = self._company_requirement_path(chat_id)
+            if not path.exists():
+                return "(no prior requirements)"
+            return path.read_text(encoding="utf-8", errors="ignore")[-12000:]
+        except Exception:
+            return "(requirement ledger unavailable)"
+
+    def _append_company_requirement(self, chat_id: str, text: str) -> None:
+        try:
+            import time
+            path = self._company_requirement_path(chat_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            entry = f"\n\n## {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n{text.strip()[:4000]}\n"
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(entry)
+        except Exception:
+            logger.debug("Failed to append company requirement", exc_info=True)
 
     async def _send_preview_urls(self, chat_id: str, text: str, sent_urls: set) -> None:
         # Surface hosted preview URLs as soon as any role mentions them, once per workflow.
