@@ -1104,7 +1104,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             pm_message = (
                 f"User request for proton company workflow:\\n{task_text}\\n\\n"
                 f"You are '{pm_key}'. Break this into role-specific tasks for these agents: {', '.join(worker_chain)}.\n"
-                "If the user asks to run, preview, host, deploy, open, or show the product, route that request directly to frontend and/or backend dev tasks. Do not make the user run it themselves unless credentials or environment are missing.\n"
+                "If the user asks to run, preview, host, deploy, open, or show the product, route that request directly to frontend and/or backend dev tasks. Do not make the user run it themselves unless credentials or environment are missing. "
                 "Return concise Thai planning plus a JSON object at the end in this exact shape:\\n"
                 '{"tasks":[{"agent":"designer","task":"..."}],"notes":"..."}\n'
                 "Only include available agents. Each task must be different and fit that role."
@@ -1270,7 +1270,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
 
 '''
 pattern = r'    async def _run_company_workflow\(self, chat_id: str, bot_id: str, bot_config: dict, task_text: str\) -> None:\n.*?(?=    async def _publish_company_activity\(|    async def _run_persona_turn\(|    def _bot_channel_prompt\()'
-new_s, count = re.subn(pattern, pm_dispatch_method, s, count=1, flags=re.S)
+new_s, count = re.subn(pattern, lambda _m: pm_dispatch_method, s, count=1, flags=re.S)
 if count:
     s = new_s
     patched = True
