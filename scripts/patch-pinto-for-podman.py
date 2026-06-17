@@ -1008,6 +1008,31 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 next_to = worker_chain[idx] if idx < len(worker_chain) else "techlead"
                 await self._publish_company_activity({"type":"peer_handoff","workflowId":workflow_id,"from":key,"to":next_to,"agent":key,"status":"idle","task":task_for_role,"summary":reply[:240]})
 
+            team_outputs = "\\n\\n".join(f"[{step.get('persona')}] task={step.get('task','')}\\n{step.get('output','')}" for step in steps)
+            await self._publish_company_activity({"type":"pm_review_started","workflowId":workflow_id,"from":"team","to":pm_key,"agent":pm_key,"status":"working","task":task_text,"summary":f"{pm_key} reviewing team outputs for follow-up"})
+            pm_review_message = (
+                f"Original user request:\\n{task_text}\\n\\n"
+                f"Team outputs so far:\\n{team_outputs}\\n\\n"
+                f"You are '{pm_key}'. If QA or any teammate found bugs, blockers, missing work, or dependencies, assign follow-up tasks to the right available agents: {', '.join(worker_chain)}.\\n"
+                "Return brief Thai review plus JSON at the end: {\"tasks\":[{\"agent\":\"backend\",\"task\":\"fix/rework ...\"}],\"notes\":\"...\"}. Return empty tasks if no follow-up needed."
+            )
+            pm_review = await self._run_persona_turn(pm_prompt, pm_review_message)
+            steps.append({"persona": pm_key, "output": pm_review, "task": "review and follow-up dispatch"})
+            await self._publish_company_activity({"type":"pm_review_completed","workflowId":workflow_id,"from":pm_key,"to":"team","agent":pm_key,"status":"idle","task":task_text,"summary":pm_review[:240]})
+            followups = self._extract_pm_tasks(pm_review, worker_chain)
+            for key, task_for_role in followups.items():
+                prompt = self._bot_channel_prompt({"persona": key}) or f"You are {key}."
+                await self._publish_company_activity({"type":"followup_dispatched","workflowId":workflow_id,"from":pm_key,"to":key,"agent":key,"status":"working","task":task_for_role,"summary":f"{pm_key} follow-up -> {key}: {task_for_role[:180]}"})
+                follow_message = (
+                    f"Original user request:\\n{task_text}\\n\\n"
+                    f"Team outputs and PM review:\\n{team_outputs}\\n\\nPM review:\\n{pm_review}\\n\\n"
+                    f"Your follow-up task from PM:\\n{task_for_role}\\n\\n"
+                    f"Your role is '{key}'. Address the issue directly. If this came from QA, respond with fix/decision and handoff back to QA/PM."
+                )
+                reply = await self._run_persona_turn(prompt, follow_message)
+                steps.append({"persona": key, "output": reply, "task": task_for_role})
+                await self._publish_company_activity({"type":"followup_completed","workflowId":workflow_id,"from":key,"to":pm_key,"agent":key,"status":"idle","task":task_for_role,"summary":reply[:240]})
+
             reviewer_key = "techlead" if "techlead" in worker_chain else worker_chain[-1] if worker_chain else pm_key
             final_prompt = self._bot_channel_prompt({"persona": reviewer_key}) or f"You are {reviewer_key}."
             combined_outputs = "\\n\\n".join(f"[{step.get('persona')}] task={step.get('task','')}\\n{step.get('output','')}" for step in steps)
@@ -1115,6 +1140,15 @@ s = s.replace('f"Recent peer outputs you may coordinate with:\n{peer_context}\n\
 s = s.replace('combined_outputs = "\n\n".join(f"[{step.get(\'persona\')}] task={step.get(\'task\',\'\')}\n{step.get(\'output\',\'\')}"', 'combined_outputs = "\\n\\n".join(f"[{step.get(\'persona\')}] task={step.get(\'task\',\'\')}\\n{step.get(\'output\',\'\')}"')
 s = s.replace('final_message = f"Original user request:\n{task_text}\n\nTeam outputs:\n{combined_outputs}\n\nCreate', 'final_message = f"Original user request:\\n{task_text}\\n\\nTeam outputs:\\n{combined_outputs}\\n\\nCreate')
 
+s = s.replace('team_outputs = "\n\n".join(f"[{step.get(\'persona\')}] task={step.get(\'task\',\'\')}\n{step.get(\'output\',\'\')}"', 'team_outputs = "\\n\\n".join(f"[{step.get(\'persona\')}] task={step.get(\'task\',\'\')}\\n{step.get(\'output\',\'\')}"')
+s = s.replace('f"Original user request:\n{task_text}\n\n"', 'f"Original user request:\\n{task_text}\\n\\n"')
+s = s.replace('f"Team outputs so far:\n{team_outputs}\n\n"', 'f"Team outputs so far:\\n{team_outputs}\\n\\n"')
+s = s.replace('}.\n"', '}.\\n"')
+s = s.replace('f"Team outputs and PM review:\n{team_outputs}\n\nPM review:\n{pm_review}\n\n"', 'f"Team outputs and PM review:\\n{team_outputs}\\n\\nPM review:\\n{pm_review}\\n\\n"')
+s = s.replace('f"Your follow-up task from PM:\n{task_for_role}\n\n"', 'f"Your follow-up task from PM:\\n{task_for_role}\\n\\n"')
+
+
+s = s.replace('"Return brief Thai review plus JSON at the end: {"tasks":[{"agent":"backend","task":"fix/rework ..."}],"notes":"..."}. Return empty tasks if no follow-up needed."', '"Return brief Thai review plus JSON at the end: {\\"tasks\\":[{\\"agent\\":\\"backend\\",\\"task\\":\\"fix/rework ...\\"}],\\"notes\\":\\"...\\"}. Return empty tasks if no follow-up needed."')
 if primary_old in s:
     s = s.replace(primary_old, primary_new)
     patched = True
