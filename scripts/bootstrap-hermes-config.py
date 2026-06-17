@@ -8,7 +8,8 @@ Auto-configures:
   - platform_toolsets.pinto: default toolset list
   - .env: API_SERVER_KEY if missing
 
-User only needs to set PINTO_BOT_ID in .env.
+User can set Pinto botId persistently in config.yaml.
+PINTO_BOT_ID from .env is only a first-boot fallback when config.yaml has no botId.
 """
 
 import os
@@ -64,26 +65,36 @@ def ensure_api_server_key() -> str:
     return key
 
 
-def ensure_pinto_bot_id() -> None:
-    """Prompt user for PINTO_BOT_ID if not set."""
-    bot_id = os.environ.get("PINTO_BOT_ID", "").strip()
+def read_env_value(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if value:
+        return value
+    if ENV_PATH.exists():
+        for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
+            if line.startswith(f"{name}="):
+                return line.split("=", 1)[1].strip()
+    return ""
+
+
+def ensure_pinto_bot_id(config: dict) -> None:
+    """Warn if Pinto botId is not set in config.yaml or environment fallback."""
+    config_bot_id = (
+        config.get("platforms", {})
+        .get("pinto", {})
+        .get("extra", {})
+        .get("botId", "")
+    )
+    bot_id = str(config_bot_id or "").strip() or read_env_value("PINTO_BOT_ID")
     if bot_id:
         return
 
-    # Check .env
-    if ENV_PATH.exists():
-        for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
-            if line.startswith("PINTO_BOT_ID="):
-                bot_id = line.split("=", 1)[1].strip()
-                if bot_id:
-                    os.environ["PINTO_BOT_ID"] = bot_id
-                    return
-
     print()
     print("=" * 50)
-    print("  PINTO_BOT_ID not set!")
-    print("  Please set it in .env:")
-    print(f"    PINTO_BOT_ID=your_bot_id")
+    print("  Pinto botId not set!")
+    print("  Preferred persistent setting:")
+    print("    hermes-config/config.yaml -> platforms.pinto.extra.botId")
+    print("  First-boot fallback:")
+    print("    PINTO_BOT_ID=your_bot_id")
     print("=" * 50)
     print()
 
@@ -142,14 +153,8 @@ def main():
         print(f"Set platforms.api_server.extra.host={api_host}")
     config["platforms"]["api_server"] = api_server
 
-    # Enable pinto with botId
-    bot_id = os.environ.get("PINTO_BOT_ID", "").strip()
-    if not bot_id and ENV_PATH.exists():
-        for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
-            if line.startswith("PINTO_BOT_ID="):
-                bot_id = line.split("=", 1)[1].strip()
-                break
-
+    # Enable pinto. Prefer existing config.yaml botId so persistent local
+    # config is not overwritten by stale .env/process env values after restart.
     if "pinto" not in config["platforms"]:
         config["platforms"]["pinto"] = {"enabled": True}
         changed = True
@@ -158,17 +163,21 @@ def main():
         config["platforms"]["pinto"] = {"enabled": True}
         changed = True
 
-    # Set botId in platforms.pinto.extra
+    # Set botId in platforms.pinto.extra only when config.yaml does not
+    # already have one. This makes config.yaml the durable source of truth;
+    # PINTO_BOT_ID remains a first-boot fallback for beginner setup.
     pinto_config = config["platforms"]["pinto"]
     if not isinstance(pinto_config, dict):
         pinto_config = {}
         config["platforms"]["pinto"] = pinto_config
-    if "extra" not in pinto_config:
+    if "extra" not in pinto_config or not isinstance(pinto_config.get("extra"), dict):
         pinto_config["extra"] = {}
-    if bot_id and pinto_config["extra"].get("botId") != bot_id:
-        pinto_config["extra"]["botId"] = bot_id
+    config_bot_id = str(pinto_config["extra"].get("botId") or "").strip()
+    fallback_bot_id = read_env_value("PINTO_BOT_ID")
+    if not config_bot_id and fallback_bot_id:
+        pinto_config["extra"]["botId"] = fallback_bot_id
         changed = True
-        print(f"Set platforms.pinto.extra.botId")
+        print("Set platforms.pinto.extra.botId from PINTO_BOT_ID fallback")
 
     # ── platform_toolsets.pinto ──
     toolsets = config.get("platform_toolsets", {})
@@ -191,7 +200,7 @@ def main():
     ensure_api_server_key()
 
     # ── Check PINTO_BOT_ID ──
-    ensure_pinto_bot_id()
+    ensure_pinto_bot_id(config)
 
     print("Bootstrap complete!")
 

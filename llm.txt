@@ -64,7 +64,7 @@ Key URLs:
 - Hermes Dashboard: `http://127.0.0.1:9119/`
 - Public Pinto webhook: `https://<cloudflare-host>/plugins/pinto/webhook`
 
-Required `.env` values:
+Required first-start `.env` values:
 ```env
 PINTO_BOT_ID=your_pinto_bot_id
 API_SERVER_KEY=generated_hex_key
@@ -74,6 +74,11 @@ GATEWAY_ALLOW_ALL_USERS=true
 HERMES_DASHBOARD=1
 HERMES_DASHBOARD_PORT=9119
 ```
+
+Persistent Pinto bot ID behavior:
+- `scripts/bootstrap-hermes-config.py` treats `hermes-config/config.yaml` `platforms.pinto.extra.botId` as the durable source of truth.
+- `PINTO_BOT_ID` from process env or `/root/.hermes/.env` is only a fallback when `config.yaml` has no botId yet.
+- Do not commit real bot IDs or secrets; `hermes-config/` and `.env` are ignored.
 
 AI provider config:
 ```env
@@ -120,7 +125,8 @@ Common expected health responses:
 
 If Pinto webhook returns 500:
 - Check gateway logs first.
-- Verify `PINTO_BOT_ID`.
+- Verify `platforms.pinto.extra.botId` in `hermes-config/config.yaml`.
+- Verify `PINTO_BOT_ID` only as first-start fallback.
 - Verify API server host is `0.0.0.0`.
 - Verify Pinto adapter compatibility patches are included in image.
 - Verify AI provider config if logs say `No inference provider configured`.

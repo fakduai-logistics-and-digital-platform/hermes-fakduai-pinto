@@ -155,19 +155,30 @@ Open `.env` in your editor.
 
 # Step 3: Set Pinto bot ID
 
-In `.env`, set your Pinto bot ID:
+In `.env`, set your Pinto bot ID for first startup:
 
 ```env
 PINTO_BOT_ID=your_pinto_bot_id_here
 ```
 
-Example:
+You get this from Pinto Developer Console / bot settings.
 
-```env
-PINTO_BOT_ID=xjOltYhGtY9nDKp
+After first startup, Hermes keeps the durable bot ID in:
+
+```text
+hermes-config/config.yaml
 ```
 
-You get this from Pinto Developer Console / bot settings.
+under:
+
+```yaml
+platforms:
+  pinto:
+    extra:
+      botId: your_pinto_bot_id_here
+```
+
+If `.env` and `hermes-config/config.yaml` differ later, `config.yaml` wins. This prevents an old `.env` from overwriting the bot ID after container restart.
 
 ---
 
