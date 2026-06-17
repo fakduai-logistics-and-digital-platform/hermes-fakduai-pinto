@@ -211,7 +211,21 @@ python3 scripts/hermes-company-run.py "Build the customer login flow" \
 Each step's reply becomes the next persona's input. Run history is saved to
 `hermes-config/company-runs/` (ignored by git, local only).
 
-To connect a Pinto bot directly to this workflow mode, set that bot's
+To connect the primary Pinto bot directly to this workflow mode, set
+`platforms.pinto.extra.companyWorkflow` in `config.yaml`:
+
+```yaml
+platforms:
+  pinto:
+    extra:
+      persona: pm
+      companyWorkflow:
+        - pm
+        - designer
+        - frontend
+```
+
+To connect an extra Pinto bot directly to this workflow mode, set that bot's
 `companyWorkflow` chain in `config.yaml`:
 
 ```yaml

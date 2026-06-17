@@ -726,5 +726,38 @@ if 'self._extra_config = extra\n' not in s:
 else:
     print('Pinto adapter extra_config reference already saved')
 
+primary_old = '''    def _bot_config(self, bot_id: str) -> Optional[dict]:
+        if self._bot_id and bot_id == self._bot_id:
+            return {}
+        cfg = self._bot_configs.get(bot_id)
+        if isinstance(cfg, dict):
+            return cfg
+        return None
+'''
+primary_new = '''    def _bot_config(self, bot_id: str) -> Optional[dict]:
+        if self._bot_id and bot_id == self._bot_id:
+            extra = getattr(self, "_extra_config", {}) or {}
+            cfg = {}
+            if isinstance(extra, dict):
+                primary_cfg = extra.get("primaryBot")
+                if isinstance(primary_cfg, dict):
+                    cfg.update(primary_cfg)
+                for key in ("persona", "personaKey", "companyWorkflow", "channelPrompt", "prompt", "role", "name", "enabled"):
+                    if key in extra and key not in cfg:
+                        cfg[key] = extra[key]
+            return cfg
+        cfg = self._bot_configs.get(bot_id)
+        if isinstance(cfg, dict):
+            return cfg
+        return None
+'''
+if primary_old in s:
+    s = s.replace(primary_old, primary_new)
+    patched = True
+elif 'primary_cfg = extra.get("primaryBot")' in s:
+    print('Pinto adapter primary bot config patch already applied')
+else:
+    raise SystemExit('Expected Pinto _bot_config primary block not found')
+
 p.write_text(s, encoding='utf-8')
 print('Patched Pinto adapter for Hermes 0.16 compatibility' if patched else 'Pinto adapter already patched')
