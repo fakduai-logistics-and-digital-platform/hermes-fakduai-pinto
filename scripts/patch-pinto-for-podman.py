@@ -60,6 +60,72 @@ else:
     s = s.replace(old, new)
     patched = True
 
+auth_old = '''            if self._webhook_secret:
+                inbound_secret = request.headers.get(PINTO_SECRET_HEADER, "")
+                if inbound_secret != self._webhook_secret:
+                    return request.app["response_class"](
+                        status=401,
+                        text=json.dumps({"error": "Invalid webhook secret"}),
+                        content_type="application/json",
+                    )
+'''
+auth_new = '''            if self._webhook_secret:
+                inbound_secret = request.headers.get(PINTO_SECRET_HEADER, "")
+                if inbound_secret != self._webhook_secret:
+                    return request.app["response_class"](
+                        status=401,
+                        text=json.dumps({
+                            "ok": False,
+                            "error": "invalid_webhook_secret",
+                            "message": (
+                                "\u2716\ufe0f Access Denied \u2014 Webhook Secret \u0e44\u0e21\u0e48\u0e16\u0e39\u0e01\u0e15\u0e49\u0e2d\u0e07 "
+                                "\u0e2b\u0e23\u0e37\u0e2d\u0e44\u0e21\u0e48\u0e44\u0e14\u0e49\u0e23\u0e31\u0e1a\u0e01\u0e32\u0e23\u0e22\u0e37\u0e19\u0e22\u0e31\u0e19\u0e08\u0e32\u0e01\u0e1f\u0e32\u0e01\u0e08\u0e32\u0e21 Hermes Gateway "
+                                "\u0e42\u0e1b\u0e23\u0e14\u0e15\u0e23\u0e27\u0e08\u0e2a\u0e2d\u0e1a Webhook Secret \u0e43\u0e2b\u0e49\u0e15\u0e23\u0e07\u0e01\u0e31\u0e1a\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e1a\u0e19 Hermes Dashboard "
+                                "\u0e41\u0e25\u0e49\u0e27\u0e25\u0e2d\u0e07\u0e2d\u0e35\u0e01\u0e04\u0e23\u0e31\u0e49\u0e07\u0e04\u0e23\u0e31\u0e1a/\u0e04\u0e48\u0e30"
+                            ),
+                        }),
+                        content_type="application/json",
+                    )
+'''
+if auth_old in s:
+    s = s.replace(auth_old, auth_new)
+    patched = True
+elif 'invalid_webhook_secret' in s:
+    print('Pinto adapter webhook secret error message patch already applied')
+else:
+    raise SystemExit('Expected Pinto webhook secret check block not found')
+
+mismatch_old = '''            if bot_id != self._bot_id:
+                return request.app["response_class"](
+                    status=403,
+                    text=json.dumps({"error": "bot_id mismatch"}),
+                    content_type="application/json",
+                )
+'''
+mismatch_new = '''            if bot_id != self._bot_id:
+                return request.app["response_class"](
+                    status=403,
+                    text=json.dumps({
+                        "ok": False,
+                        "error": "bot_id_mismatch",
+                        "message": (
+                            "\u2716\ufe0f Access Denied \u2014 Bot ID \u0e44\u0e21\u0e48\u0e16\u0e39\u0e01\u0e15\u0e49\u0e2d\u0e07 "
+                            "\u0e23\u0e49\u0e2d\u0e07\u0e02\u0e2d\u0e19\u0e35\u0e49\u0e44\u0e21\u0e48\u0e44\u0e14\u0e49\u0e16\u0e39\u0e01\u0e25\u0e07\u0e17\u0e30\u0e40\u0e1a\u0e35\u0e22\u0e19\u0e44\u0e27\u0e49\u0e01\u0e31\u0e1a Gateway \u0e19\u0e35\u0e49 "
+                            "\u0e42\u0e1b\u0e23\u0e14\u0e15\u0e23\u0e27\u0e08\u0e2a\u0e2d\u0e1a PINTO_BOT_ID \u0e43\u0e2b\u0e49\u0e15\u0e23\u0e07\u0e01\u0e31\u0e1a\u0e1a\u0e2d\u0e15\u0e17\u0e35\u0e48\u0e25\u0e07\u0e17\u0e30\u0e40\u0e1a\u0e35\u0e22\u0e19\u0e44\u0e27\u0e49 "
+                            "\u0e41\u0e25\u0e49\u0e27\u0e25\u0e2d\u0e07\u0e2d\u0e35\u0e01\u0e04\u0e23\u0e31\u0e49\u0e07\u0e04\u0e23\u0e31\u0e1a/\u0e04\u0e48\u0e30"
+                        ),
+                    }),
+                    content_type="application/json",
+                )
+'''
+if mismatch_old in s:
+    s = s.replace(mismatch_old, mismatch_new)
+    patched = True
+elif 'bot_id_mismatch' in s:
+    print('Pinto adapter bot_id mismatch error message patch already applied')
+else:
+    raise SystemExit('Expected Pinto bot_id mismatch block not found')
+
 send_old = '''    async def send(self, chat_id: str, text: str, **kwargs: Any) -> SendResult:
         """Post reply back to Pinto via ``POST /v1/bots/webhook/receive``."""
         if not self._client:

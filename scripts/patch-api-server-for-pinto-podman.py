@@ -14,7 +14,6 @@ insert = '''            # Pinto webhook compatibility route. Register before aio
             self._app["response_class"] = web.json_response
 
             async def _pinto_route(request):
-                import asyncio
                 import gc
                 if request.method == "GET":
                     return web.json_response({"ok": True, "channel": "pinto"})
@@ -26,21 +25,17 @@ insert = '''            # Pinto webhook compatibility route. Register before aio
                     if obj.__class__.__name__ == "PintoAdapter":
                         if body is None:
                             return web.json_response({"ok": False, "error": "invalid json"}, status=400)
-                        async def _run_pinto():
-                            class _Req:
-                                method = "POST"
-                                app = {"response_class": web.json_response}
-                                headers = request.headers
-                                async def json(self):
-                                    return body
-                            await obj._handle_webhook(_Req())
-                        task = asyncio.create_task(_run_pinto())
-                        task.add_done_callback(
-                            lambda t: print(f"Pinto background route error: {t.exception()}", flush=True)
-                            if t.exception()
-                            else None
-                        )
-                        return web.json_response({"ok": True, "queued": True})
+                        class _Req:
+                            method = "POST"
+                            app = {"response_class": web.json_response}
+                            headers = request.headers
+                            async def json(self):
+                                return body
+                        # Await the adapter's real response (auth errors, validation
+                        # errors, success) and relay it as-is instead of always
+                        # answering 200 queued:true before validation runs.
+                        result = await obj._handle_webhook(_Req())
+                        return result
                 return web.json_response({"ok": False, "error": "pinto adapter not ready"}, status=503)
             async def _pinto_media_route(request):
                 import gc
