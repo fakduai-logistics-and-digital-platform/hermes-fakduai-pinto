@@ -12,6 +12,35 @@ from pathlib import Path
 p = Path('/usr/local/lib/python3.11/site-packages/hermes_cli/web_server.py')
 s = p.read_text(encoding='utf-8')
 
+model_marker = '''class MessagingPlatformUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    env: Dict[str, str] = {}
+    clear_env: List[str] = []
+
+
+'''
+model_insert = '''class MessagingPlatformUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    env: Dict[str, str] = {}
+    clear_env: List[str] = []
+
+
+class PintoBotUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    description: Optional[str] = None
+    channelPrompt: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+'''
+if 'class PintoBotUpdate(BaseModel):' in s:
+    print('Dashboard Pinto bot update model already patched')
+elif model_marker in s:
+    s = s.replace(model_marker, model_insert)
+else:
+    raise SystemExit('Expected MessagingPlatformUpdate model block not found')
+
 helper_marker = '''def _catalog_lookup(platform_id: str) -> dict[str, Any] | None:
     for entry in _messaging_platform_catalog():
         if entry["id"] == platform_id:
@@ -197,6 +226,90 @@ elif api_marker in s:
     s = s.replace(api_marker, api_insert)
 else:
     raise SystemExit('Expected /api/messaging/platforms block not found')
+
+endpoints_marker = '''@app.put("/api/messaging/platforms/{platform_id}")
+'''
+endpoints_insert = '''def _pinto_bots_config(config: dict[str, Any]) -> dict[str, Any]:
+    platforms = config.setdefault("platforms", {})
+    if not isinstance(platforms, dict):
+        platforms = {}
+        config["platforms"] = platforms
+    pinto = platforms.setdefault("pinto", {})
+    if not isinstance(pinto, dict):
+        pinto = {}
+        platforms["pinto"] = pinto
+    extra = pinto.setdefault("extra", {})
+    if not isinstance(extra, dict):
+        extra = {}
+        pinto["extra"] = extra
+    bots = extra.setdefault("bots", {})
+    if not isinstance(bots, dict):
+        bots = {}
+        extra["bots"] = bots
+    return bots
+
+
+def _pinto_bot_public(bot_id: str, cfg: Any) -> dict[str, Any]:
+    data = cfg if isinstance(cfg, dict) else {}
+    return {
+        "bot_id": bot_id,
+        "name": data.get("name"),
+        "role": data.get("role"),
+        "description": data.get("description"),
+        "channelPrompt": data.get("channelPrompt"),
+        "enabled": data.get("enabled", True),
+    }
+
+
+@app.get("/api/messaging/pinto/bots")
+async def list_pinto_bots():
+    config = load_config()
+    bots = _pinto_bots_config(config)
+    return {"bots": [_pinto_bot_public(str(bot_id), cfg) for bot_id, cfg in bots.items()]}
+
+
+@app.put("/api/messaging/pinto/bots/{bot_id}")
+async def upsert_pinto_bot(bot_id: str, body: PintoBotUpdate):
+    bot_id = bot_id.strip()
+    if not bot_id:
+        raise HTTPException(status_code=400, detail="bot_id is required")
+    config = load_config()
+    bots = _pinto_bots_config(config)
+    current = bots.get(bot_id)
+    data = current if isinstance(current, dict) else {}
+    for key in ("name", "role", "description", "channelPrompt", "enabled"):
+        value = getattr(body, key)
+        if value is not None:
+            if isinstance(value, str):
+                value = value.strip()
+            if value == "":
+                data.pop(key, None)
+            else:
+                data[key] = value
+    bots[bot_id] = data
+    save_config(config)
+    return {"ok": True, "bot": _pinto_bot_public(bot_id, data), "needs_restart": True}
+
+
+@app.delete("/api/messaging/pinto/bots/{bot_id}")
+async def delete_pinto_bot(bot_id: str):
+    config = load_config()
+    bots = _pinto_bots_config(config)
+    if bot_id not in bots:
+        raise HTTPException(status_code=404, detail=f"Unknown Pinto bot: {bot_id}")
+    removed = bots.pop(bot_id)
+    save_config(config)
+    return {"ok": True, "removed": _pinto_bot_public(bot_id, removed), "needs_restart": True}
+
+
+@app.put("/api/messaging/platforms/{platform_id}")
+'''
+if '@app.get("/api/messaging/pinto/bots")' in s:
+    print('Dashboard Pinto bot management API already patched')
+elif endpoints_marker in s:
+    s = s.replace(endpoints_marker, endpoints_insert, 1)
+else:
+    raise SystemExit('Expected messaging platform PUT route marker not found')
 
 update_marker = '''    if not entry:
         raise HTTPException(
