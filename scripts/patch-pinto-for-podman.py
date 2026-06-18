@@ -1132,7 +1132,11 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             requirement_ledger = self._load_company_requirement_ledger(chat_id)
             project_instructions = (
                 f"Generated project files must be written under {projects_dir}/<project-name>. "
-                "Never write generated project files under /root. Use a clear project slug such as proton-landing."
+                "Never write generated project files under /root, /tmp, or the container home directory. "
+                "Use a clear project slug such as chaos-delivery-simulator. "
+                "Before starting a preview server, stop/kill any old preview process for the previous generated project and reuse the preferred preview port if possible. "
+                "For backend/server/preview serving code, use Go or Node.js only; do not create Python servers unless an existing project already requires Python. "
+                "For public preview, use Cloudflare only (workers.dev, pages.dev, trycloudflare.com). Do not use localhost.run."
             )
             pm_key = "pm" if "pm" in chain else chain[0]
             techlead_key = "techlead" if "techlead" in chain else None
@@ -1338,8 +1342,8 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
         base = str(task_text or "assigned task").strip()[:220]
         presets = {
             "designer": ["Extract UX goals and user journey", "Define layout, visual direction, and responsive states", "Hand off concrete UI guidance to frontend"],
-            "frontend": ["Review design/requirements", "Implement UI and interactions", "Run app locally if possible, deploy/share Cloudflare preview only, and report Cloudflare URL if available"],
-            "backend": ["Review runtime/hosting requirements", "Implement server/static serving or deploy packaging", "Validate preview command and report URL/path"],
+            "frontend": ["Review design/requirements", "Implement UI and interactions", "Stop old preview if needed, run current app locally, deploy/share Cloudflare preview only, and report Cloudflare URL if available"],
+            "backend": ["Review runtime/hosting requirements", "Implement Go or Node.js server/static serving or Cloudflare deploy packaging", "Stop old preview if needed, validate preview command and Cloudflare URL/path"],
             "qa": ["Derive acceptance checks", "Test happy paths, edge cases, responsive behavior, and preview URL", "Report pass/fail with evidence and follow-up items"],
             "techlead": ["Review outputs against requirements", "Check risks, gaps, and integration", "Produce final user-facing summary with path/link/evidence"],
             "pm": ["Convert client request into requirements", "Split role-specific tasks", "Merge outputs and new requirements into follow-up plan"],
