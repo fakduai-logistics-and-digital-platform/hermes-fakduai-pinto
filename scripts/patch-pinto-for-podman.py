@@ -1134,9 +1134,10 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 f"Generated project files must be written under {projects_dir}/<project-name>. "
                 "Never write generated project files under /root. Use a clear project slug such as proton-landing."
             )
-            pm_key = chain[0]
-            worker_chain = [key for key in chain[1:] if key]
-            meeting_agents = [pm_key] + worker_chain
+            pm_key = "pm" if "pm" in chain else chain[0]
+            techlead_key = "techlead" if "techlead" in chain else None
+            worker_chain = [key for key in chain if key not in (pm_key, techlead_key)]
+            meeting_agents = [pm_key] + ([techlead_key] if techlead_key else []) + worker_chain
             for member in meeting_agents:
                 await self._publish_company_activity({"type":"team_meeting_started","workflowId":workflow_id,"from":"pinto","to":member,"agent":member,"status":"working" if member == pm_key else "idle","location":"meeting","task":task_text,"summary":"PM kickoff meeting: requirement intake and task split"})
 
@@ -1146,11 +1147,11 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             pm_message = (
                 f"User request for proton company workflow:\\n{task_text}\\n\\n"
                 f"Recent requirement ledger for this chat:\\n{requirement_ledger}\\n\\n"
-                f"You are '{pm_key}'. Treat the user as a non-technical client. Convert vague intent into concrete goals, assumptions, acceptance criteria, constraints, and role-specific tasks for these agents: {', '.join(worker_chain)}.\n"
+                f"You are '{pm_key}'. Treat the user as a non-technical client. Convert vague intent into concrete goals, assumptions, acceptance criteria, constraints, and a brief for Tech Lead. Do not directly assign detailed implementation tasks to individual makers unless Tech Lead is unavailable. Available makers after Tech Lead: {', '.join(worker_chain)}.\n"
                 "If the user asks to run, preview, host, deploy, open, or show the product, route that request directly to frontend and/or backend dev tasks. Do not make the user run it themselves unless credentials or environment are missing. Use Cloudflare/Wrangler only for public preview/hosting. Do not use localhost.run or SSH reverse tunnels. If Cloudflare auth/config is unavailable, run locally if possible and report that public Cloudflare preview is still unavailable rather than claiming a hosted URL. "
                 "Return concise Thai planning plus a JSON object at the end in this exact shape:\\n"
-                '{"tasks":[{"agent":"designer","task":"..."}],"notes":"..."}\n'
-                "Only include available agents. Each task must be different and fit that role."
+                '{"tasks":[{"agent":"techlead","task":"technical plan and dispatch ..."}],"notes":"..."}\n'
+                "Prefer assigning the first technical planning task to techlead when available."
             )
             await self._publish_skill_context_loaded(workflow_id, pm_key, task_text)
             pm_reply = await self._run_persona_turn(pm_prompt, pm_message)
@@ -1164,7 +1165,26 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             for member in meeting_agents:
                 await self._publish_company_activity({"type":"team_meeting_ended","workflowId":workflow_id,"from":pm_key,"to":member,"agent":member,"status":"idle" if member == pm_key else "idle","location":"meeting" if member == pm_key else "desk","task":task_text,"summary":"PM stays in meeting room; agents return to desks"})
 
-            dispatch = self._extract_pm_tasks(pm_reply, worker_chain)
+            dispatch = {}
+            if techlead_key:
+                tl_prompt = self._company_role_prompt(techlead_key, self._bot_channel_prompt({"persona": techlead_key}) or f"You are {techlead_key}.")
+                tl_task = (self._extract_pm_tasks(pm_reply, [techlead_key]).get(techlead_key) or "Turn PM requirements into architecture, role-specific tasks, integration order, and Cloudflare-only preview plan.")
+                await self._publish_company_activity({"type":"task_dispatched","workflowId":workflow_id,"from":pm_key,"to":techlead_key,"agent":techlead_key,"status":"working","location":"visit:pm","task":tl_task,"summary":f"{pm_key} -> {techlead_key}: technical planning and dispatch"})
+                await self.send(chat_id, f"▶️ {techlead_key} เริ่มวาง technical plan")
+                tl_message = (
+                    f"Original user request:\n{task_text}\n\nPM intake/requirements:\n{pm_reply}\n\n"
+                    f"You are '{techlead_key}'. Create a technical plan and assign role-specific tasks to these makers only: {', '.join(worker_chain)}. Include architecture, integration order, risks, acceptance checks, and Cloudflare-only preview/deploy plan. Return concise Thai plus JSON at the end: "
+                    '{"tasks":[{"agent":"frontend","task":"..."}],"notes":"..."}.'
+                )
+                await self._publish_skill_context_loaded(workflow_id, techlead_key, tl_task)
+                techlead_plan = await self._run_persona_turn(tl_prompt, tl_message)
+                steps.append({"persona": techlead_key, "output": techlead_plan, "task": tl_task})
+                await self._stream_company_message(workflow_id=workflow_id, agent=techlead_key, from_agent=techlead_key, to="team", task=tl_task, text=techlead_plan)
+                await self._send_preview_urls(chat_id, techlead_plan, preview_urls_sent)
+                await self._publish_company_activity({"type":"role_completed","workflowId":workflow_id,"from":techlead_key,"to":"team","agent":techlead_key,"status":"done","task":tl_task,"summary":techlead_plan[:240],"message":techlead_plan[:2000]})
+                dispatch = self._extract_pm_tasks(techlead_plan, worker_chain)
+            else:
+                dispatch = self._extract_pm_tasks(pm_reply, worker_chain)
             worker_outputs = []
             for idx, key in enumerate(worker_chain, start=1):
                 task_for_role = dispatch.get(key) or f"Build on PM plan for your {key} role."
@@ -1244,20 +1264,57 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 await self.send(chat_id, f"✅ {key} แก้ follow-up เสร็จแล้ว ส่งกลับ PM")
                 asyncio.create_task(self._restore_company_agent_idle(workflow_id, key, task_for_role, 12))
 
-            reviewer_key = "techlead" if "techlead" in worker_chain else worker_chain[-1] if worker_chain else pm_key
+            reviewer_key = techlead_key if techlead_key else worker_chain[-1] if worker_chain else pm_key
             final_prompt = self._company_role_prompt(reviewer_key, self._bot_channel_prompt({"persona": reviewer_key}) or f"You are {reviewer_key}.")
             combined_outputs = "\\n\\n".join(f"[{step.get('persona')}] task={step.get('task','')}\\n{step.get('output','')}" for step in steps)
             await self._publish_company_activity({"type":"review_started","workflowId":workflow_id,"from":"team","to":reviewer_key,"agent":reviewer_key,"status":"working","location":"visit:pm","task":task_text,"summary":f"{reviewer_key} started final review with PM"})
             await self.send(chat_id, f"▶️ {reviewer_key} เริ่ม final review")
             preview_hint = "real preview URL found" if preview_urls_sent else "NO real preview URL found"
             final_message = f"Original user request:\\n{task_text}\\n\\nTeam outputs:\\n{combined_outputs}\\n\\nPreview status: {preview_hint}. Create the final answer to the Pinto user. Be practical, consolidated, and avoid repeating internal chatter. If the user asked to run/show/preview/deploy, do not claim it is running, deployed, hosted, or ready to open unless team outputs contain a real Cloudflare preview URL (workers.dev, pages.dev, trycloudflare.com). localhost.run does not count. If Preview status says NO real preview URL found, explicitly say Cloudflare preview is not available yet and list the exact next step needed to run/host it on Cloudflare."
-            await self.send(chat_id, "✅ Tech Lead กำลังสรุป final")
+            await self.send(chat_id, "✅ Tech Lead กำลังตรวจงานรวมแล้วส่งให้ PM ตรวจ")
             await self._publish_skill_context_loaded(workflow_id, reviewer_key, task_text)
             handoff = await self._run_persona_turn(final_prompt, final_message)
-            await self._stream_company_message(workflow_id=workflow_id, agent=reviewer_key, from_agent=reviewer_key, to_agent="pinto", task=task_text, text=handoff)
+            await self._stream_company_message(workflow_id=workflow_id, agent=reviewer_key, from_agent=reviewer_key, to_agent=pm_key, task=task_text, text=handoff)
             await self._send_preview_urls(chat_id, handoff, preview_urls_sent)
-            await self._publish_company_activity({"type":"workflow_completed","workflowId":workflow_id,"from":reviewer_key,"to":"pinto","agent":reviewer_key,"status":"done","task":task_text,"summary":handoff[:240],"message":handoff[:2000]})
-            await self.send(chat_id, handoff)
+            await self._publish_company_activity({"type":"review_completed","workflowId":workflow_id,"from":reviewer_key,"to":pm_key,"agent":reviewer_key,"status":"done","location":"visit:pm","task":task_text,"summary":handoff[:240],"message":handoff[:2000]})
+
+            pm_approval_prompt = self._company_role_prompt(pm_key, self._bot_channel_prompt({"persona": pm_key}) or f"You are {pm_key}.")
+            pm_approval_message = (
+                f"Original user request:\n{task_text}\n\nTech Lead review:\n{handoff}\n\n"
+                "You are PM. Inspect the Tech Lead delivery as client advocate. Decide if it is acceptable. "
+                "If acceptable, return JSON {"approved":true,"urgent":false,"tasks":[],"clientMessage":"..."}. "
+                "If not acceptable, return JSON {"approved":false,"urgent":false,"tasks":[{"agent":"techlead","task":"replan ..."}],"clientMessage":"..."}. "
+                "If urgent and the issue is narrow, set urgent true and ask Tech Lead to fix in meeting room, then QA to test; add dev helpers only if workload is large. "
+                "Never claim Cloudflare preview exists unless a workers.dev, pages.dev, or trycloudflare.com URL is present."
+            )
+            await self._publish_company_activity({"type":"pm_approval_started","workflowId":workflow_id,"from":reviewer_key,"to":pm_key,"agent":pm_key,"status":"working","location":"meeting","task":task_text,"summary":"PM reviewing Tech Lead delivery before client handoff"})
+            await self._publish_skill_context_loaded(workflow_id, pm_key, task_text)
+            pm_approval = await self._run_persona_turn(pm_approval_prompt, pm_approval_message)
+            await self._stream_company_message(workflow_id=workflow_id, agent=pm_key, from_agent=pm_key, to_agent=reviewer_key, task=task_text, text=pm_approval)
+            pm_decision = self._extract_json_obj(pm_approval) or {}
+            pm_approved = bool(pm_decision.get("approved"))
+            urgent_fix = bool(pm_decision.get("urgent"))
+            if not pm_approved:
+                await self._publish_company_activity({"type":"pm_rejected_delivery","workflowId":workflow_id,"from":pm_key,"to":reviewer_key,"agent":pm_key,"status":"working","location":"meeting","task":task_text,"summary":"PM rejected delivery; Tech Lead must replan/fix before client handoff","message":pm_approval[:2000]})
+                if urgent_fix and techlead_key:
+                    await self.send(chat_id, "⚠️ PM ไม่อนุมัติ งานเร่งด่วน: Tech Lead แก้ในห้องประชุม แล้วเรียก QA test")
+                    urgent_task = (pm_decision.get("tasks") or [{}])[0].get("task") if isinstance(pm_decision.get("tasks"), list) else None
+                    urgent_task = urgent_task or "Urgent PM fix: correct the narrow issue, call QA to test in meeting room, and involve dev helpers only if workload is too large."
+                    await self._publish_company_activity({"type":"urgent_fix_started","workflowId":workflow_id,"from":pm_key,"to":techlead_key,"agent":techlead_key,"status":"working","location":"meeting","task":urgent_task,"summary":"Tech Lead urgent fix in meeting room"})
+                    await self._publish_skill_context_loaded(workflow_id, techlead_key, urgent_task)
+                    urgent_reply = await self._run_persona_turn(final_prompt, f"PM rejected delivery and marked urgent. Fix or coordinate narrow correction now. Call QA to test in meeting room. Involve frontend/backend only if workload is large.\n\nPM review:\n{pm_approval}\n\nOriginal request:\n{task_text}")
+                    await self._stream_company_message(workflow_id=workflow_id, agent=techlead_key, from_agent=techlead_key, to_agent="qa", task=urgent_task, text=urgent_reply)
+                    await self._publish_company_activity({"type":"urgent_qa_called","workflowId":workflow_id,"from":techlead_key,"to":"qa","agent":"qa","status":"working","location":"meeting","task":urgent_task,"summary":"QA called to meeting room for urgent test","message":urgent_reply[:1200]})
+                    handoff = urgent_reply
+                else:
+                    await self.send(chat_id, "⚠️ PM ยังไม่อนุมัติ ส่ง Tech Lead กลับไปวางแผนรอบแก้ไข")
+                    await self._publish_company_activity({"type":"replan_required","workflowId":workflow_id,"from":pm_key,"to":reviewer_key,"agent":reviewer_key,"status":"working","location":"visit:pm","task":task_text,"summary":"Tech Lead must replan and dispatch follow-up work"})
+            client_text = pm_decision.get("clientMessage") if isinstance(pm_decision, dict) else ""
+            if not client_text:
+                client_text = pm_approval if pm_approved else "PM ตรวจแล้วยังไม่อนุมัติ กำลังให้ Tech Lead วางแผนแก้ไขก่อนส่งมอบ"
+            await self._send_preview_urls(chat_id, client_text, preview_urls_sent)
+            await self._publish_company_activity({"type":"workflow_completed" if pm_approved else "workflow_needs_rework","workflowId":workflow_id,"from":pm_key,"to":"pinto","agent":pm_key,"status":"done" if pm_approved else "working","location":"meeting","task":task_text,"summary":client_text[:240],"message":client_text[:2000]})
+            await self.send(chat_id, client_text)
         except Exception:
             logger.exception("Pinto company workflow failed chat_id=%s bot_id=%s", chat_id, bot_id)
             try:
@@ -1350,6 +1407,17 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             })
         except Exception:
             logger.debug("Failed to restore company agent idle", exc_info=True)
+
+    def _extract_json_obj(self, text: str) -> dict:
+        try:
+            import json, re
+            raw = str(text or "")
+            match = re.search(r"\{[\s\S]*\}\s*$", raw)
+            if not match:
+                match = re.search(r"\{[\s\S]*\}", raw)
+            return json.loads(match.group(0)) if match else {}
+        except Exception:
+            return {}
 
     def _extract_pm_tasks(self, text: str, allowed_agents: list) -> dict:
         # Extract PM JSON dispatch tasks from model output.
