@@ -1714,31 +1714,80 @@ elif pm_dispatch_marker in s:
 else:
     raise SystemExit('Expected company workflow insertion marker not found')
 
-company_role_prompt_method = '''    def _company_role_prompt(self, role_key: str, base_prompt: str) -> str:
-        """Inject vendored company AGENTS.md and SKILL.md guidance into one role prompt."""
+company_role_prompt_method = '''    def _company_selected_skill_files(self, role_key: str, task_text: str = "") -> tuple:
+        """Select relevant AGENTS/SKILL files for one role turn without loading every skill."""
         try:
             import os
             from pathlib import Path
             root = Path(os.getenv("COMPANY_SKILLS_DIR", "/root/.hermes/company-skills"))
             role = str(role_key or "default").strip().lower() or "default"
+            text = str(task_text or "").lower()
+            explicit_all = any(k in text for k in ("all skills", "ทุก skill", "ทุกสกิล", "โหลดทั้งหมด", "full taste"))
+            selected = [f"templates/workspaces/{role}/AGENTS.md", "templates/workspaces/default/AGENTS.md"]
+            reasons = []
+            def add(rel, reason):
+                if rel not in selected:
+                    selected.append(rel)
+                    reasons.append({"path": rel, "reason": reason})
+            # Small always-on role foundations.
+            if role in {"frontend", "designer"}:
+                add("skills/taste-skill/skills/taste-skill/SKILL.md", "UI role base taste guidance")
+            if role in {"frontend", "backend", "techlead", "qa"}:
+                add("skills/karpathy-guidelines/SKILL.md", "engineering base guidance")
+            if role == "pm":
+                add("skills/9arm/skills/productivity/management-talk/SKILL.md", "PM communication")
+                add("skills/9arm/skills/engineering/scrutinize/SKILL.md", "PM review/scrutiny")
+            # Task-triggered selection.
+            if any(k in text for k in ("redesign", "ui", "ux", "premium", "cyberpunk", "visual", "layout", "สวย", "ดีไซน์")):
+                add("skills/taste-skill/skills/redesign-skill/SKILL.md", "matched redesign/UI language")
+                add("skills/taste-skill/skills/gpt-tasteskill/SKILL.md", "matched visual taste critique")
+            if any(k in text for k in ("cloudflare", "preview", "deploy", "pages", "workers", "wrangler", "tunnel", "trycloudflare", "รัน", "ลิงก์")):
+                add("skills/cloudflare/SKILL.md", "matched Cloudflare/preview/deploy")
+                add("skills/cloudflare/skills/wrangler/SKILL.md", "matched Wrangler/Pages/Tunnel")
+            if any(k in text for k in ("bug", "error", "exception", "traceback", "blocked request", "allowedhosts", "vite.config", "พัง", "บั๊ค", "บัก")):
+                add("skills/9arm/skills/engineering/debug-mantra/SKILL.md", "matched bug/error debugging")
+                if role in {"qa", "techlead"}:
+                    add("skills/mattpocock/engineering/triage/SKILL.md", "matched triage/debug ownership")
+            if any(k in text for k in ("test", "qa", "acceptance", "expected", "actual", "smoke")):
+                add("skills/mattpocock/deprecated/qa/SKILL.md", "matched QA/testing")
+                add("skills/mattpocock/engineering/tdd/SKILL.md", "matched test-driven checks")
+            if any(k in text for k in ("architecture", "review", "scrutinize", "risk", "tech lead", "ระบบ", "ออกแบบระบบ")):
+                add("skills/9arm/skills/engineering/scrutinize/SKILL.md", "matched review/risk scrutiny")
+                add("skills/mattpocock/engineering/codebase-design/SKILL.md", "matched architecture/design")
+            if role == "backend" and any(k in text for k in ("api", "server", "go", "database", "db", "handler", "endpoint")):
+                add("skills/mattpocock/engineering/tdd/SKILL.md", "matched backend implementation/testing")
+                add("skills/9arm/skills/engineering/debug-mantra/SKILL.md", "matched backend debugging")
+            if role in {"designer", "frontend"} and explicit_all:
+                for path in sorted((root / "skills" / "taste-skill").rglob("*.md")):
+                    add(str(path.relative_to(root)), "explicit request to load all taste skills")
+            # Cap unless explicitly all.
+            cap = int(os.getenv("COMPANY_MAX_SKILL_FILES", "8") or "8")
+            role_docs = selected[:2]
+            skill_docs = selected[2:]
+            if not explicit_all:
+                skill_docs = skill_docs[:cap]
+            files = [rel for rel in role_docs + skill_docs if (root / rel).exists()]
+            reason_map = {r["path"]: r["reason"] for r in reasons}
+            selection_reasons = [{"path": rel, "reason": reason_map.get(rel, "role document")} for rel in files]
+            return files, selection_reasons
+        except Exception:
+            return [], []
+
+    def _company_role_prompt(self, role_key: str, base_prompt: str, task_text: str = "") -> str:
+        """Inject selected company AGENTS.md and relevant SKILL.md guidance into one role prompt."""
+        try:
+            import os
+            from pathlib import Path
+            root = Path(os.getenv("COMPANY_SKILLS_DIR", "/root/.hermes/company-skills"))
+            role = str(role_key or "default").strip().lower() or "default"
+            files, reasons = self._company_selected_skill_files(role, task_text)
             parts = [str(base_prompt or f"You are {role}.")]
-            for path in (root / "templates" / "workspaces" / role / "AGENTS.md", root / "templates" / "workspaces" / "default" / "AGENTS.md"):
-                if path.exists():
-                    parts.append(f"\\n\\n--- COMPANY AGENTS ({path}) ---\\n{path.read_text(encoding='utf-8', errors='ignore')[:16000]}")
-            skill_map = {
-                "pm": ["skills/stop-slop/SKILL.md", "skills/9arm/skills/productivity/management-talk/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md", "skills/9arm/skills/productivity/qwenchance/SKILL.md", "skills/karpathy-guidelines/SKILL.md"],
-                "designer": ["skills/taste-skill/skills/taste-skill/SKILL.md", "skills/karpathy-guidelines/SKILL.md"],
-                "frontend": ["skills/taste-skill/skills/taste-skill/SKILL.md", "skills/karpathy-guidelines/SKILL.md", "skills/cloudflare/skills/cloudflare/SKILL.md", "skills/cloudflare/skills/wrangler/SKILL.md", "skills/cloudflare/skills/workers-best-practices/SKILL.md"],
-                "backend": ["skills/karpathy-guidelines/SKILL.md", "skills/mattpocock/engineering/tdd/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/mattpocock/engineering/domain-modeling/SKILL.md", "skills/9arm/skills/engineering/debug-mantra/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md", "skills/cloudflare/skills/cloudflare/SKILL.md", "skills/cloudflare/skills/wrangler/SKILL.md", "skills/cloudflare/skills/workers-best-practices/SKILL.md"],
-                "qa": ["skills/karpathy-guidelines/SKILL.md", "skills/mattpocock/deprecated/qa/SKILL.md", "skills/mattpocock/in-progress/review/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/mattpocock/engineering/tdd/SKILL.md", "skills/mattpocock/engineering/triage/SKILL.md", "skills/9arm/skills/engineering/debug-mantra/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md"],
-                "techlead": ["skills/karpathy-guidelines/SKILL.md", "skills/stop-slop/SKILL.md", "skills/mattpocock/engineering/codebase-design/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md", "skills/9arm/skills/engineering/post-mortem/SKILL.md", "skills/9arm/skills/productivity/management-talk/SKILL.md"],
-            }
-            if role in {"designer", "frontend"}:
-                taste_files = sorted(str(p.relative_to(root)) for p in (root / "skills" / "taste-skill").rglob("*.md"))
-                skill_map[role] = list(dict.fromkeys(taste_files + skill_map.get(role, [])))
-            budget = int(os.getenv("COMPANY_SKILL_PROMPT_BUDGET", "90000"))
+            reason_text = "\n".join(f"- {r.get('path')}: {r.get('reason')}" for r in reasons)
+            if reason_text:
+                parts.append(f"\n\n--- SKILL SELECTION REASONS ---\n{reason_text}")
+            budget = int(os.getenv("COMPANY_SKILL_PROMPT_BUDGET", "52000"))
             used = sum(len(x) for x in parts)
-            for rel in skill_map.get(role, ["skills/karpathy-guidelines/SKILL.md"]):
+            for rel in files:
                 path = root / rel
                 if not path.exists():
                     continue
@@ -1746,12 +1795,21 @@ company_role_prompt_method = '''    def _company_role_prompt(self, role_key: str
                 if remaining <= 2000:
                     break
                 text = path.read_text(encoding="utf-8", errors="ignore")[:remaining]
-                parts.append(f"\\n\\n--- SKILL {rel} ---\\n{text}")
+                label = "COMPANY AGENTS" if rel.endswith("AGENTS.md") else "SKILL"
+                parts.append(f"\n\n--- {label} {rel} ---\n{text}")
                 used += len(text)
-            parts.append("\\n\\nFollow the injected AGENTS.md and SKILL.md instructions for this role before doing the task. If they conflict with the user's task, keep safety rules and role scope.")
+            parts.append("\n\nUse only the selected injected skills that fit this task. If a needed skill is not loaded, state which skill would be needed instead of pretending. Keep safety rules and role scope.")
             return "".join(parts)
         except Exception:
             return str(base_prompt or f"You are {role_key}.")
+
+    def _company_role_skill_files(self, role_key: str, task_text: str = "") -> list:
+        files, _ = self._company_selected_skill_files(role_key, task_text)
+        return files
+
+    def _company_role_skill_reasons(self, role_key: str, task_text: str = "") -> list:
+        _, reasons = self._company_selected_skill_files(role_key, task_text)
+        return reasons
 
 '''
 if 'def _company_role_prompt(self, role_key: str, base_prompt: str)' not in s:
@@ -1764,7 +1822,8 @@ else:
     print('Pinto adapter company role prompt helper already applied')
 
 skill_context_proof_method = '''    async def _publish_skill_context_loaded(self, workflow_id: str, role_key: str, task_text: str) -> None:
-        files = self._company_role_skill_files(role_key)
+        files = self._company_role_skill_files(role_key, task_text)
+        skill_reasons = self._company_role_skill_reasons(role_key, task_text)
         proofs = []
         total_bytes = 0
         try:
@@ -1781,7 +1840,7 @@ skill_context_proof_method = '''    async def _publish_skill_context_loaded(self
                 proofs.append({"path": rel, "bytes": len(data), "sha256": digest})
         except Exception:
             logger.debug("Failed to build skill context proof", exc_info=True)
-        await self._publish_company_activity({"type":"skill_context_loaded","workflowId":workflow_id,"from":"runtime","to":role_key,"agent":role_key,"status":"working","location":self._company_role_location(role_key),"task":task_text,"summary":f"{role_key} loaded {len(files)} AGENTS/SKILL files ({total_bytes} bytes)","files":files,"skillFiles":files,"skillProofs":proofs,"skillTotalBytes":total_bytes})
+        await self._publish_company_activity({"type":"skill_context_loaded","workflowId":workflow_id,"from":"runtime","to":role_key,"agent":role_key,"status":"working","location":self._company_role_location(role_key),"task":task_text,"summary":f"{role_key} loaded {len(files)} AGENTS/SKILL files ({total_bytes} bytes)","files":files,"skillFiles":files,"skillProofs":proofs,"skillTotalBytes":total_bytes,"skillReasons":skill_reasons})
 
 '''
 _skill_context_pattern = r'    async def _publish_skill_context_loaded\(self, workflow_id: str, role_key: str, task_text: str\) -> None:\n.*?(?=    async def _run_persona_turn\()'
@@ -1796,7 +1855,7 @@ elif '    async def _run_persona_turn(self, system_prompt: str, user_message: st
 
 
 # Ensure skill file listing helper exists for dashboard proof events.
-company_role_skill_files_method = '    def _company_role_skill_files(self, role_key: str) -> list:\n        """Return runtime AGENTS.md/SKILL.md files available for one company role."""\n        try:\n            import os\n            from pathlib import Path\n            root = Path(os.getenv("COMPANY_SKILLS_DIR", "/root/.hermes/company-skills"))\n            role = str(role_key or "default").strip().lower() or "default"\n            skill_map = {\n                "pm": ["skills/stop-slop/SKILL.md", "skills/9arm/skills/productivity/management-talk/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md", "skills/9arm/skills/productivity/qwenchance/SKILL.md", "skills/karpathy-guidelines/SKILL.md"],\n                "designer": ["skills/taste-skill/skills/taste-skill/SKILL.md", "skills/karpathy-guidelines/SKILL.md"],\n                "frontend": ["skills/taste-skill/skills/taste-skill/SKILL.md", "skills/karpathy-guidelines/SKILL.md", "skills/cloudflare/SKILL.md", "skills/cloudflare/skills/wrangler/SKILL.md"],\n                "backend": ["skills/karpathy-guidelines/SKILL.md", "skills/mattpocock/engineering/tdd/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/mattpocock/engineering/domain-modeling/SKILL.md", "skills/9arm/skills/engineering/debug-mantra/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md", "skills/cloudflare/SKILL.md", "skills/cloudflare/skills/workers-best-practices/SKILL.md"],\n                "qa": ["skills/karpathy-guidelines/SKILL.md", "skills/mattpocock/deprecated/qa/SKILL.md", "skills/mattpocock/in-progress/review/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/mattpocock/engineering/tdd/SKILL.md", "skills/mattpocock/engineering/triage/SKILL.md", "skills/9arm/skills/engineering/debug-mantra/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md"],\n                "techlead": ["skills/karpathy-guidelines/SKILL.md", "skills/stop-slop/SKILL.md", "skills/mattpocock/engineering/codebase-design/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md", "skills/9arm/skills/engineering/post-mortem/SKILL.md", "skills/9arm/skills/productivity/management-talk/SKILL.md"],\n            }\n            if role in {"designer", "frontend"}:\n                taste_files = sorted(str(p.relative_to(root)) for p in (root / "skills" / "taste-skill").rglob("*.md"))\n                skill_map[role] = list(dict.fromkeys(taste_files + skill_map.get(role, [])))\n            candidates = [f"templates/workspaces/{role}/AGENTS.md", "templates/workspaces/default/AGENTS.md"] + skill_map.get(role, ["skills/karpathy-guidelines/SKILL.md"])\n            return [rel for rel in candidates if (root / rel).exists()]\n        except Exception:\n            return []\n\n'
+company_role_skill_files_method = '    def _company_selected_skill_files(self, role_key: str, task_text: str = "") -> tuple:\n        """Select relevant AGENTS/SKILL files for one role turn without loading every skill."""\n        try:\n            import os\n            from pathlib import Path\n            root = Path(os.getenv("COMPANY_SKILLS_DIR", "/root/.hermes/company-skills"))\n            role = str(role_key or "default").strip().lower() or "default"\n            text = str(task_text or "").lower()\n            explicit_all = any(k in text for k in ("all skills", "ทุก skill", "ทุกสกิล", "โหลดทั้งหมด", "full taste"))\n            selected = [f"templates/workspaces/{role}/AGENTS.md", "templates/workspaces/default/AGENTS.md"]\n            reasons = []\n            def add(rel, reason):\n                if rel not in selected:\n                    selected.append(rel)\n                    reasons.append({"path": rel, "reason": reason})\n            # Small always-on role foundations.\n            if role in {"frontend", "designer"}:\n                add("skills/taste-skill/skills/taste-skill/SKILL.md", "UI role base taste guidance")\n            if role in {"frontend", "backend", "techlead", "qa"}:\n                add("skills/karpathy-guidelines/SKILL.md", "engineering base guidance")\n            if role == "pm":\n                add("skills/9arm/skills/productivity/management-talk/SKILL.md", "PM communication")\n                add("skills/9arm/skills/engineering/scrutinize/SKILL.md", "PM review/scrutiny")\n            # Task-triggered selection.\n            if any(k in text for k in ("redesign", "ui", "ux", "premium", "cyberpunk", "visual", "layout", "สวย", "ดีไซน์")):\n                add("skills/taste-skill/skills/redesign-skill/SKILL.md", "matched redesign/UI language")\n                add("skills/taste-skill/skills/gpt-tasteskill/SKILL.md", "matched visual taste critique")\n            if any(k in text for k in ("cloudflare", "preview", "deploy", "pages", "workers", "wrangler", "tunnel", "trycloudflare", "รัน", "ลิงก์")):\n                add("skills/cloudflare/SKILL.md", "matched Cloudflare/preview/deploy")\n                add("skills/cloudflare/skills/wrangler/SKILL.md", "matched Wrangler/Pages/Tunnel")\n            if any(k in text for k in ("bug", "error", "exception", "traceback", "blocked request", "allowedhosts", "vite.config", "พัง", "บั๊ค", "บัก")):\n                add("skills/9arm/skills/engineering/debug-mantra/SKILL.md", "matched bug/error debugging")\n                if role in {"qa", "techlead"}:\n                    add("skills/mattpocock/engineering/triage/SKILL.md", "matched triage/debug ownership")\n            if any(k in text for k in ("test", "qa", "acceptance", "expected", "actual", "smoke")):\n                add("skills/mattpocock/deprecated/qa/SKILL.md", "matched QA/testing")\n                add("skills/mattpocock/engineering/tdd/SKILL.md", "matched test-driven checks")\n            if any(k in text for k in ("architecture", "review", "scrutinize", "risk", "tech lead", "ระบบ", "ออกแบบระบบ")):\n                add("skills/9arm/skills/engineering/scrutinize/SKILL.md", "matched review/risk scrutiny")\n                add("skills/mattpocock/engineering/codebase-design/SKILL.md", "matched architecture/design")\n            if role == "backend" and any(k in text for k in ("api", "server", "go", "database", "db", "handler", "endpoint")):\n                add("skills/mattpocock/engineering/tdd/SKILL.md", "matched backend implementation/testing")\n                add("skills/9arm/skills/engineering/debug-mantra/SKILL.md", "matched backend debugging")\n            if role in {"designer", "frontend"} and explicit_all:\n                for path in sorted((root / "skills" / "taste-skill").rglob("*.md")):\n                    add(str(path.relative_to(root)), "explicit request to load all taste skills")\n            # Cap unless explicitly all.\n            cap = int(os.getenv("COMPANY_MAX_SKILL_FILES", "8") or "8")\n            role_docs = selected[:2]\n            skill_docs = selected[2:]\n            if not explicit_all:\n                skill_docs = skill_docs[:cap]\n            files = [rel for rel in role_docs + skill_docs if (root / rel).exists()]\n            reason_map = {r["path"]: r["reason"] for r in reasons}\n            selection_reasons = [{"path": rel, "reason": reason_map.get(rel, "role document")} for rel in files]\n            return files, selection_reasons\n        except Exception:\n            return [], []\n\n    def _company_role_prompt(self, role_key: str, base_prompt: str, task_text: str = "") -> str:\n        """Inject selected company AGENTS.md and relevant SKILL.md guidance into one role prompt."""\n        try:\n            import os\n            from pathlib import Path\n            root = Path(os.getenv("COMPANY_SKILLS_DIR", "/root/.hermes/company-skills"))\n            role = str(role_key or "default").strip().lower() or "default"\n            files, reasons = self._company_selected_skill_files(role, task_text)\n            parts = [str(base_prompt or f"You are {role}.")]\n            reason_text = "\\n".join(f"- {r.get(\'path\')}: {r.get(\'reason\')}" for r in reasons)\n            if reason_text:\n                parts.append(f"\\n\\n--- SKILL SELECTION REASONS ---\\n{reason_text}")\n            budget = int(os.getenv("COMPANY_SKILL_PROMPT_BUDGET", "52000"))\n            used = sum(len(x) for x in parts)\n            for rel in files:\n                path = root / rel\n                if not path.exists():\n                    continue\n                remaining = budget - used\n                if remaining <= 2000:\n                    break\n                text = path.read_text(encoding="utf-8", errors="ignore")[:remaining]\n                label = "COMPANY AGENTS" if rel.endswith("AGENTS.md") else "SKILL"\n                parts.append(f"\\n\\n--- {label} {rel} ---\\n{text}")\n                used += len(text)\n            parts.append("\\n\\nUse only the selected injected skills that fit this task. If a needed skill is not loaded, state which skill would be needed instead of pretending. Keep safety rules and role scope.")\n            return "".join(parts)\n        except Exception:\n            return str(base_prompt or f"You are {role_key}.")\n\n    def _company_role_skill_files(self, role_key: str, task_text: str = "") -> list:\n        files, _ = self._company_selected_skill_files(role_key, task_text)\n        return files\n\n    def _company_role_skill_reasons(self, role_key: str, task_text: str = "") -> list:\n        _, reasons = self._company_selected_skill_files(role_key, task_text)\n        return reasons\n\n'
 if 'def _company_role_skill_files(self, role_key: str)' not in s:
     publish_marker = '    async def _publish_skill_context_loaded(self, workflow_id: str, role_key: str, task_text: str) -> None:\n'
     if publish_marker not in s:
