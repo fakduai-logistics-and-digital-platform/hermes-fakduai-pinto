@@ -1727,6 +1727,36 @@ if 'def _company_role_prompt(self, role_key: str, base_prompt: str)' not in s:
 else:
     print('Pinto adapter company role prompt helper already applied')
 
+skill_context_proof_method = '''    async def _publish_skill_context_loaded(self, workflow_id: str, role_key: str, task_text: str) -> None:
+        files = self._company_role_skill_files(role_key)
+        proofs = []
+        total_bytes = 0
+        try:
+            import hashlib, os
+            from pathlib import Path
+            root = Path(os.getenv("COMPANY_SKILLS_DIR", "/root/.hermes/company-skills"))
+            for rel in files:
+                path = root / rel
+                if not path.exists() or not path.is_file():
+                    continue
+                data = path.read_bytes()
+                digest = hashlib.sha256(data).hexdigest()
+                total_bytes += len(data)
+                proofs.append({"path": rel, "bytes": len(data), "sha256": digest})
+        except Exception:
+            logger.debug("Failed to build skill context proof", exc_info=True)
+        await self._publish_company_activity({"type":"skill_context_loaded","workflowId":workflow_id,"from":"runtime","to":role_key,"agent":role_key,"status":"working","location":self._company_role_location(role_key),"task":task_text,"summary":f"{role_key} loaded {len(files)} AGENTS/SKILL files ({total_bytes} bytes)","files":files,"skillFiles":files,"skillProofs":proofs,"skillTotalBytes":total_bytes})
+
+'''
+_skill_context_pattern = r'    async def _publish_skill_context_loaded\(self, workflow_id: str, role_key: str, task_text: str\) -> None:\n.*?(?=    async def _run_persona_turn\()'
+_s, n = re.subn(_skill_context_pattern, skill_context_proof_method, s, count=1, flags=re.S)
+if n:
+    s = _s
+    patched = True
+elif '    async def _run_persona_turn(self, system_prompt: str, user_message: str) -> str:\n' in s:
+    s = s.replace('    async def _run_persona_turn(self, system_prompt: str, user_message: str) -> str:\n', skill_context_proof_method + '    async def _run_persona_turn(self, system_prompt: str, user_message: str) -> str:\n', 1)
+    patched = True
+
 extra_config_marker = '        self._persona_configs = extra.get("pintoAgents") if isinstance(extra.get("pintoAgents"), dict) else {}\n'
 if 'self._extra_config = extra\n' not in s:
     if extra_config_marker not in s:
