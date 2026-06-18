@@ -71,10 +71,27 @@ PY
 # Expose a stable container path for generated projects. It points inside
 # HERMES_HOME so host users can see artifacts through the existing bind mount.
 COMPANY_PROJECTS_DIR="${COMPANY_PROJECTS_DIR:-/company-projects}"
-mkdir -p "${HERMES_HOME}/company-projects"
+# When COMPANY_PROJECTS_DIR is a bind mount (Podman compose maps host
+# ../company-projects to /company-projects), never replace it with a symlink.
+# Replacing/ln-ing into an existing mount creates a broken nested link such as
+# /company-projects/company-projects -> /root/.hermes/company-projects, which
+# Finder cannot resolve on the host.
+mkdir -p "${COMPANY_PROJECTS_DIR}" 2>/dev/null || true
 if [ "${COMPANY_PROJECTS_DIR}" != "${HERMES_HOME}/company-projects" ]; then
-  rm -rf "${COMPANY_PROJECTS_DIR}" 2>/dev/null || true
-  ln -s "${HERMES_HOME}/company-projects" "${COMPANY_PROJECTS_DIR}" 2>/dev/null || true
+  if [ -L "${HERMES_HOME}/company-projects" ]; then
+    rm -f "${HERMES_HOME}/company-projects" 2>/dev/null || true
+  elif [ -e "${HERMES_HOME}/company-projects" ] && [ ! -d "${HERMES_HOME}/company-projects" ]; then
+    rm -f "${HERMES_HOME}/company-projects" 2>/dev/null || true
+  fi
+  if [ ! -e "${HERMES_HOME}/company-projects" ]; then
+    ln -s "${COMPANY_PROJECTS_DIR}" "${HERMES_HOME}/company-projects" 2>/dev/null || mkdir -p "${HERMES_HOME}/company-projects"
+  fi
+else
+  mkdir -p "${HERMES_HOME}/company-projects"
+fi
+# Clean up the historical broken nested link if an older entrypoint created it.
+if [ -L "${COMPANY_PROJECTS_DIR}/company-projects" ]; then
+  rm -f "${COMPANY_PROJECTS_DIR}/company-projects" 2>/dev/null || true
 fi
 
 # ── Runtime defaults ──
