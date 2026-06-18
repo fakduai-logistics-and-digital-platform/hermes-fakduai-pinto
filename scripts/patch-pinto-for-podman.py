@@ -1091,6 +1091,18 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             preview_urls_sent = set()
             workflow_id = f"pinto-{chat_id}-{uuid.uuid4().hex[:8]}"
             projects_dir = os.getenv("COMPANY_PROJECTS_DIR", "/company-projects")
+            if os.getenv("CLEAR_COMPANY_PROJECTS_ON_WORKFLOW_START", "true").strip().lower() in ("1", "true", "yes", "on"):
+                import shutil
+                from pathlib import Path
+                root = Path(projects_dir)
+                root.mkdir(parents=True, exist_ok=True)
+                for child in root.iterdir():
+                    if child.name in (".gitkeep", ".DS_Store"):
+                        continue
+                    if child.is_dir() and not child.is_symlink():
+                        shutil.rmtree(child)
+                    else:
+                        child.unlink(missing_ok=True)
             requirement_ledger = self._load_company_requirement_ledger(chat_id)
             self._append_company_requirement(chat_id, task_text)
             requirement_ledger = self._load_company_requirement_ledger(chat_id)
