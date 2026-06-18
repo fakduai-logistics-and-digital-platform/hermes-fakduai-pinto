@@ -1284,10 +1284,10 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
 
             pm_approval_prompt = self._company_role_prompt(pm_key, self._bot_channel_prompt({"persona": pm_key}) or f"You are {pm_key}.")
             pm_approval_message = (
-                f"Original user request:\n{task_text}\n\nTech Lead review:\n{handoff}\n\n"
+                f"Original user request:\\n{task_text}\\n\\nTech Lead review:\\n{handoff}\\n\\n"
                 "You are PM. Inspect the Tech Lead delivery as client advocate. Decide if it is acceptable. "
-                "If acceptable, return JSON {"approved":true,"urgent":false,"tasks":[],"clientMessage":"..."}. "
-                "If not acceptable, return JSON {"approved":false,"urgent":false,"tasks":[{"agent":"techlead","task":"replan ..."}],"clientMessage":"..."}. "
+                'If acceptable, return JSON {"approved":true,"urgent":false,"tasks":[],"clientMessage":"..."}. '
+                'If not acceptable, return JSON {"approved":false,"urgent":false,"tasks":[{"agent":"techlead","task":"replan ..."}],"clientMessage":"..."}. '
                 "If urgent and the issue is narrow, set urgent true and ask Tech Lead to fix in meeting room, then QA to test; add dev helpers only if workload is large. "
                 "Never claim Cloudflare preview exists unless a workers.dev, pages.dev, or trycloudflare.com URL is present."
             )
