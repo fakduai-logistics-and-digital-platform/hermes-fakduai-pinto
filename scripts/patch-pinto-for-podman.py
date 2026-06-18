@@ -1119,7 +1119,13 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             preview_urls_sent = set()
             workflow_id = f"pinto-{chat_id}-{uuid.uuid4().hex[:8]}"
             projects_dir = os.getenv("COMPANY_PROJECTS_DIR", "/company-projects")
-            if os.getenv("CLEAR_COMPANY_PROJECTS_ON_WORKFLOW_START", "true").strip().lower() in ("1", "true", "yes", "on"):
+            requirement_ledger = self._load_company_requirement_ledger(chat_id)
+            followup_keywords = ("ไหน", "cloudflare", "ลิงก์", "link", "url", "ต่อ", "ต่อจาก", "เมื่อกี้", "อันเดิม", "งานเดิม", "preview", "deploy", "run", "รัน")
+            is_followup_request = bool(str(requirement_ledger or "").strip() and str(requirement_ledger).strip() != "(no prior requirements)" and len(str(task_text or "").strip()) <= 160 and any(k in str(task_text or "").lower() for k in followup_keywords))
+            if is_followup_request:
+                await self.send(chat_id, "🔎 รับเป็น follow-up ของงานเดิม ไม่เริ่มโปรเจ็คใหม่")
+                task_text = f"Follow-up on the existing/latest company project. User asks: {task_text}. Use the requirement ledger and existing files; do not restart from scratch or create a new app unless impossible."
+            if (not is_followup_request) and os.getenv("CLEAR_COMPANY_PROJECTS_ON_WORKFLOW_START", "true").strip().lower() in ("1", "true", "yes", "on"):
                 import shutil
                 from pathlib import Path
                 root = Path(projects_dir)
@@ -1131,7 +1137,6 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                         shutil.rmtree(child)
                     else:
                         child.unlink(missing_ok=True)
-            requirement_ledger = self._load_company_requirement_ledger(chat_id)
             self._append_company_requirement(chat_id, task_text)
             requirement_ledger = self._load_company_requirement_ledger(chat_id)
             project_instructions = (
