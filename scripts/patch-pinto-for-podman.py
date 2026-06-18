@@ -758,6 +758,30 @@ if 'async def _run_company_workflow(' not in s:
         except Exception:
             return str(base_prompt or f"You are {role_key}.")
 
+    def _company_role_skill_files(self, role_key: str) -> list:
+        """Return runtime AGENTS.md/SKILL.md files available for one company role."""
+        try:
+            import os
+            from pathlib import Path
+            root = Path(os.getenv("COMPANY_SKILLS_DIR", "/root/.hermes/company-skills"))
+            role = str(role_key or "default").strip().lower() or "default"
+            skill_map = {
+                "pm": ["skills/stop-slop/SKILL.md", "skills/9arm/skills/productivity/management-talk/SKILL.md", "skills/9arm/skills/productivity/qwenchance/SKILL.md", "skills/karpathy-guidelines/SKILL.md"],
+                "designer": ["skills/taste-skill/skills/taste-skill/SKILL.md", "skills/karpathy-guidelines/SKILL.md"],
+                "frontend": ["skills/taste-skill/skills/taste-skill/SKILL.md", "skills/karpathy-guidelines/SKILL.md", "skills/cloudflare/SKILL.md", "skills/cloudflare/skills/wrangler/SKILL.md"],
+                "backend": ["skills/karpathy-guidelines/SKILL.md", "skills/mattpocock/engineering/tdd/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/mattpocock/engineering/domain-modeling/SKILL.md", "skills/9arm/skills/engineering/debug-mantra/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md", "skills/cloudflare/SKILL.md", "skills/cloudflare/skills/workers-best-practices/SKILL.md"],
+                "qa": ["skills/karpathy-guidelines/SKILL.md", "skills/mattpocock/deprecated/qa/SKILL.md", "skills/mattpocock/in-progress/review/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/mattpocock/engineering/tdd/SKILL.md", "skills/mattpocock/engineering/triage/SKILL.md", "skills/9arm/skills/engineering/debug-mantra/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md"],
+                "techlead": ["skills/karpathy-guidelines/SKILL.md", "skills/stop-slop/SKILL.md", "skills/mattpocock/engineering/codebase-design/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md", "skills/9arm/skills/engineering/post-mortem/SKILL.md", "skills/9arm/skills/productivity/management-talk/SKILL.md"],
+            }
+            candidates = [f"templates/workspaces/{role}/AGENTS.md", "templates/workspaces/default/AGENTS.md"] + skill_map.get(role, ["skills/karpathy-guidelines/SKILL.md"])
+            return [rel for rel in candidates if (root / rel).exists()]
+        except Exception:
+            return []
+
+    async def _publish_skill_context_loaded(self, workflow_id: str, role_key: str, task_text: str) -> None:
+        files = self._company_role_skill_files(role_key)
+        await self._publish_company_activity({"type":"skill_context_loaded","workflowId":workflow_id,"from":"runtime","to":role_key,"agent":role_key,"status":"working","location":self._company_role_location(role_key),"task":task_text,"summary":f"{role_key} loaded {len(files)} AGENTS/SKILL files","files":files,"skillFiles":files})
+
     async def _run_persona_turn(self, system_prompt: str, user_message: str) -> str:
         """Run a single persona turn through the in-process Hermes agent."""
         loop = asyncio.get_running_loop()
@@ -1128,6 +1152,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 '{"tasks":[{"agent":"designer","task":"..."}],"notes":"..."}\n'
                 "Only include available agents. Each task must be different and fit that role."
             )
+            await self._publish_skill_context_loaded(workflow_id, pm_key, task_text)
             pm_reply = await self._run_persona_turn(pm_prompt, pm_message)
             await self.send(chat_id, "✅ PM แบ่งงานแล้ว กำลังให้ทีมลงมือทำ")
             steps.append({"persona": pm_key, "output": pm_reply, "task": "plan and dispatch"})
@@ -1159,6 +1184,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                     f"Recent peer outputs you may coordinate with:\\n{peer_context}\\n\\n"
                     f"Your role is '{key}'. Do only your assigned role-specific work. Complete this todo checklist step by step before handoff:\\n" + "\\n".join(f"- [ ] {todo}" for todo in role_todos) + "\\nTalk to/hand off to the next relevant teammate when useful. Do not redo PM planning."
                 )
+                await self._publish_skill_context_loaded(workflow_id, key, task_for_role)
                 reply = await self._run_persona_turn(prompt, user_message)
                 worker_outputs.append({"persona": key, "output": reply, "task": task_for_role})
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
@@ -1182,6 +1208,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 f"You are '{pm_key}'. Merge teammate outputs with the latest requirement ledger. If new/changed requirements conflict with completed work, preserve useful completed work and assign targeted follow-up tasks to the right available agents: {', '.join(worker_chain)}. If QA or any teammate found bugs, blockers, missing work, or dependencies, assign follow-up tasks too.\\n"
                 "Return brief Thai review plus JSON at the end: {\"tasks\":[{\"agent\":\"backend\",\"task\":\"fix/rework ...\"}],\"notes\":\"...\"}. Return empty tasks if no follow-up needed."
             )
+            await self._publish_skill_context_loaded(workflow_id, pm_key, task_text)
             pm_review = await self._run_persona_turn(pm_prompt, pm_review_message)
             steps.append({"persona": pm_key, "output": pm_review, "task": "review and follow-up dispatch"})
             await self._stream_company_message(workflow_id=workflow_id, agent=pm_key, from_agent=pm_key, to_agent="team", task=task_text, text=pm_review)
@@ -1207,6 +1234,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                     f"Your follow-up task from PM:\\n{task_for_role}\\n\\n"
                     f"Your role is '{key}'. Address the issue directly. Complete this todo checklist step by step before handoff:\\n" + "\\n".join(f"- [ ] {todo}" for todo in role_todos) + "\\nIf this came from QA, respond with fix/decision and handoff back to QA/PM."
                 )
+                await self._publish_skill_context_loaded(workflow_id, key, task_for_role)
                 reply = await self._run_persona_turn(prompt, follow_message)
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
                 await self._stream_company_message(workflow_id=workflow_id, agent=key, from_agent=key, to_agent=pm_key, task=task_for_role, text=reply)
@@ -1224,6 +1252,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             preview_hint = "real preview URL found" if preview_urls_sent else "NO real preview URL found"
             final_message = f"Original user request:\\n{task_text}\\n\\nTeam outputs:\\n{combined_outputs}\\n\\nPreview status: {preview_hint}. Create the final answer to the Pinto user. Be practical, consolidated, and avoid repeating internal chatter. If the user asked to run/show/preview/deploy, do not claim it is running, deployed, hosted, or ready to open unless team outputs contain a real Cloudflare preview URL (workers.dev, pages.dev, trycloudflare.com). localhost.run does not count. If Preview status says NO real preview URL found, explicitly say Cloudflare preview is not available yet and list the exact next step needed to run/host it on Cloudflare."
             await self.send(chat_id, "✅ Tech Lead กำลังสรุป final")
+            await self._publish_skill_context_loaded(workflow_id, reviewer_key, task_text)
             handoff = await self._run_persona_turn(final_prompt, final_message)
             await self._stream_company_message(workflow_id=workflow_id, agent=reviewer_key, from_agent=reviewer_key, to_agent="pinto", task=task_text, text=handoff)
             await self._send_preview_urls(chat_id, handoff, preview_urls_sent)
