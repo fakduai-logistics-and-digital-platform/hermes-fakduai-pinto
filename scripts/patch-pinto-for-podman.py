@@ -1183,7 +1183,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 await self._publish_skill_context_loaded(workflow_id, techlead_key, tl_task)
                 techlead_plan = await self._run_persona_turn(tl_prompt, tl_message)
                 steps.append({"persona": techlead_key, "output": techlead_plan, "task": tl_task})
-                await self._stream_company_message(workflow_id=workflow_id, agent=techlead_key, from_agent=techlead_key, to="team", task=tl_task, text=techlead_plan)
+                await self._stream_company_message(workflow_id=workflow_id, agent=techlead_key, from_agent=techlead_key, to_agent="team", task=tl_task, text=techlead_plan)
                 await self._send_preview_urls(chat_id, techlead_plan, preview_urls_sent)
                 await self._publish_company_activity({"type":"role_completed","workflowId":workflow_id,"from":techlead_key,"to":"team","agent":techlead_key,"status":"done","task":tl_task,"summary":techlead_plan[:240],"message":techlead_plan[:2000]})
                 dispatch = self._extract_pm_tasks(techlead_plan, worker_chain)
