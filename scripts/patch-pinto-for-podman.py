@@ -1064,7 +1064,7 @@ if 'async def _run_company_workflow(' not in s:
             if not text:
                 return
             import re
-            urls = re.findall(r"https://[^\s<>)\]"']+(?:workers\.dev|pages\.dev|trycloudflare\.com)[^\s<>)\]"']*", str(text))
+            urls = re.findall(r"https://[^\s<>)\]\"']+(?:workers\.dev|pages\.dev|trycloudflare\.com)[^\s<>)\]\"']*", str(text))
             for url in urls:
                 clean = url.strip().rstrip(".,;:!?)]}").rstrip("'").rstrip('"')
                 if not clean or clean in sent_urls:
