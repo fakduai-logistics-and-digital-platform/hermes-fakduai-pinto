@@ -643,7 +643,7 @@ if 'async def _run_company_workflow(' not in s:
             latest_preview_url = str(project_memory.get("previewUrl") or "").strip()
             await self.send(chat_id, f"🎯 direct role: {role} เริ่มทำงาน")
             await self._publish_company_activity({"type":"direct_role_started","workflowId":workflow_id,"from":"pinto","to":role,"agent":role,"status":"working","location":self._company_role_location(role),"task":task_text,"summary":f"/{role} direct task: {task_text[:180]}"})
-            await self._publish_skill_context_loaded(workflow_id, role, task_text)
+            await self._publish_skill_context_loaded(workflow_id, role, task_text, chat_id)
             base_prompt = self._bot_channel_prompt({"persona": role}) or f"You are {role}."
             prompt = self._company_role_prompt(role, base_prompt)
             message = (
@@ -758,7 +758,7 @@ if 'async def _run_company_workflow(' not in s:
                 '{"tasks":[{"agent":"techlead","task":"technical plan and dispatch ..."}],"notes":"..."}. '
                 "Prefer assigning the first technical planning task to techlead when available."
             )
-            await self._publish_skill_context_loaded(workflow_id, pm_key, task_text)
+            await self._publish_skill_context_loaded(workflow_id, pm_key, task_text, chat_id)
             pm_reply = await self._run_persona_turn(pm_prompt, pm_message)
             await self.send(chat_id, "✅ PM สรุป requirement แล้ว กำลังคุยกับ Tech Lead ก่อนให้ทีมลงมือทำ")
             steps.append({"persona": pm_key, "output": pm_reply, "task": "plan and dispatch"})
@@ -781,7 +781,7 @@ if 'async def _run_company_workflow(' not in s:
                     f"You are '{techlead_key}'. Create a technical plan and assign role-specific tasks to these makers only: {', '.join(worker_chain)}. Include architecture, integration order, risks, acceptance checks, and Cloudflare-only preview/deploy plan. Return concise Thai plus JSON at the end: "
                     '{"tasks":[{"agent":"frontend","task":"..."}],"notes":"..."}.'
                 )
-                await self._publish_skill_context_loaded(workflow_id, techlead_key, tl_task)
+                await self._publish_skill_context_loaded(workflow_id, techlead_key, tl_task, chat_id)
                 techlead_plan = await self._run_persona_turn(tl_prompt, tl_message)
                 steps.append({"persona": techlead_key, "output": techlead_plan, "task": tl_task})
                 await self._stream_company_message(workflow_id=workflow_id, agent=techlead_key, from_agent=techlead_key, to_agent="team", task=tl_task, text=techlead_plan)
@@ -809,7 +809,7 @@ if 'async def _run_company_workflow(' not in s:
                     f"Recent peer outputs you may coordinate with:\n{peer_context}\n\n"
                     f"Your role is '{key}'. Do only your assigned role-specific work. Complete this todo checklist step by step before handoff:\n" + "\n".join(f"- [ ] {todo}" for todo in role_todos) + "\nTalk to/hand off to the next relevant teammate when useful. Do not redo PM planning."
                 )
-                await self._publish_skill_context_loaded(workflow_id, key, task_for_role)
+                await self._publish_skill_context_loaded(workflow_id, key, task_for_role, chat_id)
                 reply = await self._run_persona_turn(prompt, user_message)
                 worker_outputs.append({"persona": key, "output": reply, "task": task_for_role})
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
@@ -834,7 +834,7 @@ if 'async def _run_company_workflow(' not in s:
                 "Hard limit: PM may create only ONE follow-up round in this workflow. Do not create a second follow-up loop. Prefer the smallest targeted task set that can unblock delivery. "
                 "Return brief Thai review plus JSON at the end: {\"tasks\":[{\"agent\":\"backend\",\"task\":\"fix/rework ...\"}],\"notes\":\"...\"}. Return empty tasks if no follow-up needed."
             )
-            await self._publish_skill_context_loaded(workflow_id, pm_key, task_text)
+            await self._publish_skill_context_loaded(workflow_id, pm_key, task_text, chat_id)
             pm_review = await self._run_persona_turn(pm_prompt, pm_review_message)
             steps.append({"persona": pm_key, "output": pm_review, "task": "review and follow-up dispatch"})
             await self._stream_company_message(workflow_id=workflow_id, agent=pm_key, from_agent=pm_key, to_agent="team", task=task_text, text=pm_review)
@@ -860,7 +860,7 @@ if 'async def _run_company_workflow(' not in s:
                     f"Your follow-up task from PM:\n{task_for_role}\n\n"
                     f"Your role is '{key}'. Address the issue directly. Complete this todo checklist step by step before handoff:\n" + "\n".join(f"- [ ] {todo}" for todo in role_todos) + "\nIf this came from QA, respond with fix/decision and handoff back to QA/PM."
                 )
-                await self._publish_skill_context_loaded(workflow_id, key, task_for_role)
+                await self._publish_skill_context_loaded(workflow_id, key, task_for_role, chat_id)
                 reply = await self._run_persona_turn(prompt, follow_message)
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
                 await self._stream_company_message(workflow_id=workflow_id, agent=key, from_agent=key, to_agent=pm_key, task=task_for_role, text=reply)
@@ -878,7 +878,7 @@ if 'async def _run_company_workflow(' not in s:
             preview_hint = "real preview URL found" if preview_urls_sent else "NO real preview URL found"
             final_message = f"Original user request:\n{task_text}\n\nTeam outputs:\n{combined_outputs}\n\nPreview status: {preview_hint}. Create the final answer to the Pinto user. Be practical, consolidated, and avoid repeating internal chatter. If the user asked to run/show/preview/deploy, do not claim it is running, deployed, hosted, or ready to open unless team outputs contain a real Cloudflare preview URL (workers.dev, pages.dev, trycloudflare.com). localhost.run does not count. If Preview status says NO real preview URL found, explicitly say Cloudflare preview is not available yet and list the exact next step needed to run/host it on Cloudflare."
             await self.send(chat_id, "✅ Tech Lead กำลังตรวจงานรวมแล้วส่งให้ PM ตรวจ")
-            await self._publish_skill_context_loaded(workflow_id, reviewer_key, task_text)
+            await self._publish_skill_context_loaded(workflow_id, reviewer_key, task_text, chat_id)
             handoff = await self._run_persona_turn(final_prompt, final_message)
             await self._stream_company_message(workflow_id=workflow_id, agent=reviewer_key, from_agent=reviewer_key, to_agent=pm_key, task=task_text, text=handoff)
             await self._send_preview_urls(chat_id, handoff, preview_urls_sent)
@@ -895,7 +895,7 @@ if 'async def _run_company_workflow(' not in s:
                 "Never claim Cloudflare preview exists unless a workers.dev, pages.dev, or trycloudflare.com URL is present."
             )
             await self._publish_company_activity({"type":"pm_approval_started","workflowId":workflow_id,"from":reviewer_key,"to":pm_key,"agent":pm_key,"status":"working","location":"meeting","task":task_text,"summary":"PM reviewing Tech Lead delivery before client handoff"})
-            await self._publish_skill_context_loaded(workflow_id, pm_key, task_text)
+            await self._publish_skill_context_loaded(workflow_id, pm_key, task_text, chat_id)
             pm_approval = await self._run_persona_turn(pm_approval_prompt, pm_approval_message)
             await self._stream_company_message(workflow_id=workflow_id, agent=pm_key, from_agent=pm_key, to_agent=reviewer_key, task=task_text, text=pm_approval)
             pm_decision = self._extract_json_obj(pm_approval) or {}
@@ -908,7 +908,7 @@ if 'async def _run_company_workflow(' not in s:
                     urgent_task = (pm_decision.get("tasks") or [{}])[0].get("task") if isinstance(pm_decision.get("tasks"), list) else None
                     urgent_task = urgent_task or "Urgent PM fix: correct the narrow issue, call QA to test in meeting room, and involve dev helpers only if workload is too large."
                     await self._publish_company_activity({"type":"urgent_fix_started","workflowId":workflow_id,"from":pm_key,"to":techlead_key,"agent":techlead_key,"status":"working","location":"meeting","task":urgent_task,"summary":"Tech Lead urgent fix in meeting room"})
-                    await self._publish_skill_context_loaded(workflow_id, techlead_key, urgent_task)
+                    await self._publish_skill_context_loaded(workflow_id, techlead_key, urgent_task, chat_id)
                     urgent_reply = await self._run_persona_turn(final_prompt, f"PM rejected delivery and marked urgent. Fix or coordinate narrow correction now. Call QA to test in meeting room. Involve frontend/backend only if workload is large.\n\nPM review:\n{pm_approval}\n\nOriginal request:\n{task_text}")
                     await self._stream_company_message(workflow_id=workflow_id, agent=techlead_key, from_agent=techlead_key, to_agent="qa", task=urgent_task, text=urgent_reply)
                     await self._publish_company_activity({"type":"urgent_qa_called","workflowId":workflow_id,"from":techlead_key,"to":"qa","agent":"qa","status":"working","location":"meeting","task":urgent_task,"summary":"QA called to meeting room for urgent test","message":urgent_reply[:1200]})
@@ -926,7 +926,7 @@ if 'async def _run_company_workflow(' not in s:
                             "Return concise Thai plus JSON at the end: "
                             '{"tasks":[{"agent":"frontend","task":"fix ..."}],"notes":"..."}.'
                         )
-                        await self._publish_skill_context_loaded(workflow_id, techlead_key, replan_task)
+                        await self._publish_skill_context_loaded(workflow_id, techlead_key, replan_task, chat_id)
                         replan_reply = await self._run_persona_turn(final_prompt, replan_message)
                         steps.append({"persona": techlead_key, "output": replan_reply, "task": replan_task})
                         await self._stream_company_message(workflow_id=workflow_id, agent=techlead_key, from_agent=techlead_key, to_agent="team", task=replan_task, text=replan_reply)
@@ -946,7 +946,7 @@ if 'async def _run_company_workflow(' not in s:
                                 f"Your rework task:\n{task_for_role}\n\n"
                                 f"Your role is '{key}'. Fix only your assigned gap. Complete checklist:\n" + "\n".join(f"- [ ] {todo}" for todo in role_todos) + "\nHand off evidence back to Tech Lead."
                             )
-                            await self._publish_skill_context_loaded(workflow_id, key, task_for_role)
+                            await self._publish_skill_context_loaded(workflow_id, key, task_for_role, chat_id)
                             rework_reply = await self._run_persona_turn(prompt, rework_message)
                             rework_outputs.append({"persona": key, "output": rework_reply, "task": task_for_role})
                             steps.append({"persona": key, "output": rework_reply, "task": task_for_role})
@@ -1311,7 +1311,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 '{"tasks":[{"agent":"techlead","task":"technical plan and dispatch ..."}],"notes":"..."}. '
                 "Prefer assigning the first technical planning task to techlead when available."
             )
-            await self._publish_skill_context_loaded(workflow_id, pm_key, task_text)
+            await self._publish_skill_context_loaded(workflow_id, pm_key, task_text, chat_id)
             pm_reply = await self._run_persona_turn(pm_prompt, pm_message)
             await self.send(chat_id, "✅ PM สรุป requirement แล้ว กำลังคุยกับ Tech Lead ก่อนให้ทีมลงมือทำ")
             steps.append({"persona": pm_key, "output": pm_reply, "task": "plan and dispatch"})
@@ -1334,7 +1334,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                     f"You are '{techlead_key}'. Create a technical plan and assign role-specific tasks to these makers only: {', '.join(worker_chain)}. Include architecture, integration order, risks, acceptance checks, and Cloudflare-only preview/deploy plan. Return concise Thai plus JSON at the end: "
                     '{"tasks":[{"agent":"frontend","task":"..."}],"notes":"..."}.'
                 )
-                await self._publish_skill_context_loaded(workflow_id, techlead_key, tl_task)
+                await self._publish_skill_context_loaded(workflow_id, techlead_key, tl_task, chat_id)
                 techlead_plan = await self._run_persona_turn(tl_prompt, tl_message)
                 steps.append({"persona": techlead_key, "output": techlead_plan, "task": tl_task})
                 await self._stream_company_message(workflow_id=workflow_id, agent=techlead_key, from_agent=techlead_key, to_agent="team", task=tl_task, text=techlead_plan)
@@ -1362,7 +1362,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                     f"Recent peer outputs you may coordinate with:\\n{peer_context}\\n\\n"
                     f"Your role is '{key}'. Do only your assigned role-specific work. Complete this todo checklist step by step before handoff:\\n" + "\\n".join(f"- [ ] {todo}" for todo in role_todos) + "\\nTalk to/hand off to the next relevant teammate when useful. Do not redo PM planning."
                 )
-                await self._publish_skill_context_loaded(workflow_id, key, task_for_role)
+                await self._publish_skill_context_loaded(workflow_id, key, task_for_role, chat_id)
                 reply = await self._run_persona_turn(prompt, user_message)
                 worker_outputs.append({"persona": key, "output": reply, "task": task_for_role})
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
@@ -1387,7 +1387,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 "Hard limit: PM may create only ONE follow-up round in this workflow. Do not create a second follow-up loop. Prefer the smallest targeted task set that can unblock delivery. "
                 "Return brief Thai review plus JSON at the end: {\"tasks\":[{\"agent\":\"backend\",\"task\":\"fix/rework ...\"}],\"notes\":\"...\"}. Return empty tasks if no follow-up needed."
             )
-            await self._publish_skill_context_loaded(workflow_id, pm_key, task_text)
+            await self._publish_skill_context_loaded(workflow_id, pm_key, task_text, chat_id)
             pm_review = await self._run_persona_turn(pm_prompt, pm_review_message)
             steps.append({"persona": pm_key, "output": pm_review, "task": "review and follow-up dispatch"})
             await self._stream_company_message(workflow_id=workflow_id, agent=pm_key, from_agent=pm_key, to_agent="team", task=task_text, text=pm_review)
@@ -1413,7 +1413,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                     f"Your follow-up task from PM:\\n{task_for_role}\\n\\n"
                     f"Your role is '{key}'. Address the issue directly. Complete this todo checklist step by step before handoff:\\n" + "\\n".join(f"- [ ] {todo}" for todo in role_todos) + "\\nIf this came from QA, respond with fix/decision and handoff back to QA/PM."
                 )
-                await self._publish_skill_context_loaded(workflow_id, key, task_for_role)
+                await self._publish_skill_context_loaded(workflow_id, key, task_for_role, chat_id)
                 reply = await self._run_persona_turn(prompt, follow_message)
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
                 await self._stream_company_message(workflow_id=workflow_id, agent=key, from_agent=key, to_agent=pm_key, task=task_for_role, text=reply)
@@ -1431,7 +1431,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             preview_hint = "real preview URL found" if preview_urls_sent else "NO real preview URL found"
             final_message = f"Original user request:\\n{task_text}\\n\\nTeam outputs:\\n{combined_outputs}\\n\\nPreview status: {preview_hint}. Create the final answer to the Pinto user. Be practical, consolidated, and avoid repeating internal chatter. If the user asked to run/show/preview/deploy, do not claim it is running, deployed, hosted, or ready to open unless team outputs contain a real Cloudflare preview URL (workers.dev, pages.dev, trycloudflare.com). localhost.run does not count. If Preview status says NO real preview URL found, explicitly say Cloudflare preview is not available yet and list the exact next step needed to run/host it on Cloudflare."
             await self.send(chat_id, "✅ Tech Lead กำลังตรวจงานรวมแล้วส่งให้ PM ตรวจ")
-            await self._publish_skill_context_loaded(workflow_id, reviewer_key, task_text)
+            await self._publish_skill_context_loaded(workflow_id, reviewer_key, task_text, chat_id)
             handoff = await self._run_persona_turn(final_prompt, final_message)
             await self._stream_company_message(workflow_id=workflow_id, agent=reviewer_key, from_agent=reviewer_key, to_agent=pm_key, task=task_text, text=handoff)
             await self._send_preview_urls(chat_id, handoff, preview_urls_sent)
@@ -1448,7 +1448,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 "Never claim Cloudflare preview exists unless a workers.dev, pages.dev, or trycloudflare.com URL is present."
             )
             await self._publish_company_activity({"type":"pm_approval_started","workflowId":workflow_id,"from":reviewer_key,"to":pm_key,"agent":pm_key,"status":"working","location":"meeting","task":task_text,"summary":"PM reviewing Tech Lead delivery before client handoff"})
-            await self._publish_skill_context_loaded(workflow_id, pm_key, task_text)
+            await self._publish_skill_context_loaded(workflow_id, pm_key, task_text, chat_id)
             pm_approval = await self._run_persona_turn(pm_approval_prompt, pm_approval_message)
             await self._stream_company_message(workflow_id=workflow_id, agent=pm_key, from_agent=pm_key, to_agent=reviewer_key, task=task_text, text=pm_approval)
             pm_decision = self._extract_json_obj(pm_approval) or {}
@@ -1461,7 +1461,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                     urgent_task = (pm_decision.get("tasks") or [{}])[0].get("task") if isinstance(pm_decision.get("tasks"), list) else None
                     urgent_task = urgent_task or "Urgent PM fix: correct the narrow issue, call QA to test in meeting room, and involve dev helpers only if workload is too large."
                     await self._publish_company_activity({"type":"urgent_fix_started","workflowId":workflow_id,"from":pm_key,"to":techlead_key,"agent":techlead_key,"status":"working","location":"meeting","task":urgent_task,"summary":"Tech Lead urgent fix in meeting room"})
-                    await self._publish_skill_context_loaded(workflow_id, techlead_key, urgent_task)
+                    await self._publish_skill_context_loaded(workflow_id, techlead_key, urgent_task, chat_id)
                     urgent_reply = await self._run_persona_turn(final_prompt, f"PM rejected delivery and marked urgent. Fix or coordinate narrow correction now. Call QA to test in meeting room. Involve frontend/backend only if workload is large.\\n\\nPM review:\\n{pm_approval}\\n\\nOriginal request:\\n{task_text}")
                     await self._stream_company_message(workflow_id=workflow_id, agent=techlead_key, from_agent=techlead_key, to_agent="qa", task=urgent_task, text=urgent_reply)
                     await self._publish_company_activity({"type":"urgent_qa_called","workflowId":workflow_id,"from":techlead_key,"to":"qa","agent":"qa","status":"working","location":"meeting","task":urgent_task,"summary":"QA called to meeting room for urgent test","message":urgent_reply[:1200]})
@@ -1479,7 +1479,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                             "Return concise Thai plus JSON at the end: "
                             '{"tasks":[{"agent":"frontend","task":"fix ..."}],"notes":"..."}.'
                         )
-                        await self._publish_skill_context_loaded(workflow_id, techlead_key, replan_task)
+                        await self._publish_skill_context_loaded(workflow_id, techlead_key, replan_task, chat_id)
                         replan_reply = await self._run_persona_turn(final_prompt, replan_message)
                         steps.append({"persona": techlead_key, "output": replan_reply, "task": replan_task})
                         await self._stream_company_message(workflow_id=workflow_id, agent=techlead_key, from_agent=techlead_key, to_agent="team", task=replan_task, text=replan_reply)
@@ -1499,7 +1499,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                                 f"Your rework task:\\n{task_for_role}\\n\\n"
                                 f"Your role is '{key}'. Fix only your assigned gap. Complete checklist:\\n" + "\\n".join(f"- [ ] {todo}" for todo in role_todos) + "\\nHand off evidence back to Tech Lead."
                             )
-                            await self._publish_skill_context_loaded(workflow_id, key, task_for_role)
+                            await self._publish_skill_context_loaded(workflow_id, key, task_for_role, chat_id)
                             rework_reply = await self._run_persona_turn(prompt, rework_message)
                             rework_outputs.append({"persona": key, "output": rework_reply, "task": task_for_role})
                             steps.append({"persona": key, "output": rework_reply, "task": task_for_role})
@@ -1826,7 +1826,7 @@ if 'def _company_role_prompt(self, role_key: str, base_prompt: str)' not in s:
 else:
     print('Pinto adapter company role prompt helper already applied')
 
-skill_context_proof_method = '''    async def _publish_skill_context_loaded(self, workflow_id: str, role_key: str, task_text: str) -> None:
+skill_context_proof_method = '''    async def _publish_skill_context_loaded(self, workflow_id: str, role_key: str, task_text: str, chat_id: str = "") -> None:
         files = self._company_role_skill_files(role_key, task_text)
         skill_reasons = self._company_role_skill_reasons(role_key, task_text)
         proofs = []
@@ -1846,6 +1846,21 @@ skill_context_proof_method = '''    async def _publish_skill_context_loaded(self
         except Exception:
             logger.debug("Failed to build skill context proof", exc_info=True)
         await self._publish_company_activity({"type":"skill_context_loaded","workflowId":workflow_id,"from":"runtime","to":role_key,"agent":role_key,"status":"working","location":self._company_role_location(role_key),"task":task_text,"summary":f"{role_key} loaded {len(files)} AGENTS/SKILL files ({total_bytes} bytes)","files":files,"skillFiles":files,"skillProofs":proofs,"skillTotalBytes":total_bytes,"skillReasons":skill_reasons})
+        if chat_id:
+            try:
+                names = []
+                for rel in files:
+                    name = rel.rstrip('/').split('/')[-2] if rel.endswith('/SKILL.md') else rel.rstrip('/').split('/')[-1]
+                    if name == "AGENTS.md":
+                        name = rel.replace("templates/workspaces/", "").replace("/AGENTS.md", " AGENTS")
+                    if name not in names:
+                        names.append(name)
+                preview = ", ".join(names[:6])
+                if len(names) > 6:
+                    preview += f", +{len(names)-6}"
+                await self.send(str(chat_id), f"📚 {role_key} อ่าน skills เสร็จแล้ว: {preview}")
+            except Exception:
+                logger.debug("Failed to announce skill context in chat", exc_info=True)
 
 '''
 _skill_context_pattern = r'    async def _publish_skill_context_loaded\(self, workflow_id: str, role_key: str, task_text: str\) -> None:\n.*?(?=    async def _run_persona_turn\()'
@@ -1862,14 +1877,14 @@ elif '    async def _run_persona_turn(self, system_prompt: str, user_message: st
 # Ensure skill file listing helper exists for dashboard proof events.
 company_role_skill_files_method = '    def _company_selected_skill_files(self, role_key: str, task_text: str = "") -> tuple:\n        """Select relevant AGENTS/SKILL files for one role turn without loading every skill."""\n        try:\n            import os\n            from pathlib import Path\n            root = Path(os.getenv("COMPANY_SKILLS_DIR", "/root/.hermes/company-skills"))\n            role = str(role_key or "default").strip().lower() or "default"\n            text = str(task_text or "").lower()\n            explicit_all = any(k in text for k in ("all skills", "ทุก skill", "ทุกสกิล", "โหลดทั้งหมด", "full taste"))\n            selected = [f"templates/workspaces/{role}/AGENTS.md", "templates/workspaces/default/AGENTS.md"]\n            reasons = []\n            def add(rel, reason):\n                if rel not in selected:\n                    selected.append(rel)\n                    reasons.append({"path": rel, "reason": reason})\n            # Small always-on role foundations.\n            if role in {"frontend", "designer"}:\n                add("skills/taste-skill/skills/taste-skill/SKILL.md", "UI role base taste guidance")\n            if role in {"frontend", "backend", "techlead", "qa"}:\n                add("skills/karpathy-guidelines/SKILL.md", "engineering base guidance")\n            if role == "pm":\n                add("skills/9arm/skills/productivity/management-talk/SKILL.md", "PM communication")\n                add("skills/9arm/skills/engineering/scrutinize/SKILL.md", "PM review/scrutiny")\n            # Task-triggered selection.\n            if any(k in text for k in ("redesign", "ui", "ux", "premium", "cyberpunk", "visual", "layout", "สวย", "ดีไซน์")):\n                add("skills/taste-skill/skills/redesign-skill/SKILL.md", "matched redesign/UI language")\n                add("skills/taste-skill/skills/gpt-tasteskill/SKILL.md", "matched visual taste critique")\n            if any(k in text for k in ("cloudflare", "preview", "deploy", "pages", "workers", "wrangler", "tunnel", "trycloudflare", "รัน", "ลิงก์")):\n                add("skills/cloudflare/SKILL.md", "matched Cloudflare/preview/deploy")\n                add("skills/cloudflare/skills/wrangler/SKILL.md", "matched Wrangler/Pages/Tunnel")\n            if any(k in text for k in ("bug", "error", "exception", "traceback", "blocked request", "allowedhosts", "vite.config", "พัง", "บั๊ค", "บัก")):\n                add("skills/9arm/skills/engineering/debug-mantra/SKILL.md", "matched bug/error debugging")\n                if role in {"qa", "techlead"}:\n                    add("skills/mattpocock/engineering/triage/SKILL.md", "matched triage/debug ownership")\n            if any(k in text for k in ("test", "qa", "acceptance", "expected", "actual", "smoke")):\n                add("skills/mattpocock/deprecated/qa/SKILL.md", "matched QA/testing")\n                add("skills/mattpocock/engineering/tdd/SKILL.md", "matched test-driven checks")\n            if any(k in text for k in ("architecture", "review", "scrutinize", "risk", "tech lead", "ระบบ", "ออกแบบระบบ")):\n                add("skills/9arm/skills/engineering/scrutinize/SKILL.md", "matched review/risk scrutiny")\n                add("skills/mattpocock/engineering/codebase-design/SKILL.md", "matched architecture/design")\n            if role == "backend" and any(k in text for k in ("api", "server", "go", "database", "db", "handler", "endpoint")):\n                add("skills/mattpocock/engineering/tdd/SKILL.md", "matched backend implementation/testing")\n                add("skills/9arm/skills/engineering/debug-mantra/SKILL.md", "matched backend debugging")\n            if role in {"designer", "frontend"} and explicit_all:\n                for path in sorted((root / "skills" / "taste-skill").rglob("*.md")):\n                    add(str(path.relative_to(root)), "explicit request to load all taste skills")\n            # Cap unless explicitly all.\n            cap = int(os.getenv("COMPANY_MAX_SKILL_FILES", "8") or "8")\n            role_docs = selected[:2]\n            skill_docs = selected[2:]\n            if not explicit_all:\n                skill_docs = skill_docs[:cap]\n            files = [rel for rel in role_docs + skill_docs if (root / rel).exists()]\n            reason_map = {r["path"]: r["reason"] for r in reasons}\n            selection_reasons = [{"path": rel, "reason": reason_map.get(rel, "role document")} for rel in files]\n            return files, selection_reasons\n        except Exception:\n            return [], []\n\n    def _company_role_prompt(self, role_key: str, base_prompt: str, task_text: str = "") -> str:\n        """Inject selected company AGENTS.md and relevant SKILL.md guidance into one role prompt."""\n        try:\n            import os\n            from pathlib import Path\n            root = Path(os.getenv("COMPANY_SKILLS_DIR", "/root/.hermes/company-skills"))\n            role = str(role_key or "default").strip().lower() or "default"\n            files, reasons = self._company_selected_skill_files(role, task_text)\n            parts = [str(base_prompt or f"You are {role}.")]\n            reason_text = "\\n".join(f"- {r.get(\'path\')}: {r.get(\'reason\')}" for r in reasons)\n            if reason_text:\n                parts.append(f"\\n\\n--- SKILL SELECTION REASONS ---\\n{reason_text}")\n            budget = int(os.getenv("COMPANY_SKILL_PROMPT_BUDGET", "52000"))\n            used = sum(len(x) for x in parts)\n            for rel in files:\n                path = root / rel\n                if not path.exists():\n                    continue\n                remaining = budget - used\n                if remaining <= 2000:\n                    break\n                text = path.read_text(encoding="utf-8", errors="ignore")[:remaining]\n                label = "COMPANY AGENTS" if rel.endswith("AGENTS.md") else "SKILL"\n                parts.append(f"\\n\\n--- {label} {rel} ---\\n{text}")\n                used += len(text)\n            parts.append("\\n\\nUse only the selected injected skills that fit this task. If a needed skill is not loaded, state which skill would be needed instead of pretending. Keep safety rules and role scope.")\n            return "".join(parts)\n        except Exception:\n            return str(base_prompt or f"You are {role_key}.")\n\n    def _company_role_skill_files(self, role_key: str, task_text: str = "") -> list:\n        files, _ = self._company_selected_skill_files(role_key, task_text)\n        return files\n\n    def _company_role_skill_reasons(self, role_key: str, task_text: str = "") -> list:\n        _, reasons = self._company_selected_skill_files(role_key, task_text)\n        return reasons\n\n'
 if 'def _company_role_skill_files(self, role_key: str)' not in s:
-    publish_marker = '    async def _publish_skill_context_loaded(self, workflow_id: str, role_key: str, task_text: str) -> None:\n'
+    publish_marker = '    async def _publish_skill_context_loaded(self, workflow_id: str, role_key: str, task_text: str, chat_id: str = "") -> None:\n'
     if publish_marker not in s:
         raise SystemExit('Expected _publish_skill_context_loaded marker for skill file helper')
     s = s.replace(publish_marker, company_role_skill_files_method + publish_marker, 1)
     patched = True
 
 # Ensure direct role method exists even when the company workflow was already patched earlier.
-direct_role_method = '    async def _run_company_role_direct(self, chat_id: str, bot_id: str, bot_config: dict, role_key: str, task_text: str) -> None:\n        # Run one company role directly from a slash command such as /frontend.\n        try:\n            await self.send_typing(chat_id)\n            role = str(role_key or "").strip().lower()\n            allowed = {"pm", "frontend", "designer", "backend", "qa", "techlead"}\n            if role not in allowed:\n                await self.send(chat_id, "⚠️ role command ไม่รองรับ ใช้ /frontend /designer /backend /qa /techlead /pm")\n                return\n            workflow_id = f"direct-{role}-{chat_id}-{uuid.uuid4().hex[:8]}"\n            projects_dir = os.getenv("COMPANY_PROJECTS_DIR", "/company-projects")\n            project_memory = self._load_company_project_memory(chat_id)\n            latest_project_path = str(project_memory.get("projectPath") or "").strip()\n            latest_preview_url = str(project_memory.get("previewUrl") or "").strip()\n            await self.send(chat_id, f"🎯 direct role: {role} เริ่มทำงาน")\n            await self._publish_company_activity({"type":"direct_role_started","workflowId":workflow_id,"from":"pinto","to":role,"agent":role,"status":"working","location":self._company_role_location(role),"task":task_text,"summary":f"/{role} direct task: {task_text[:180]}"})\n            await self._publish_skill_context_loaded(workflow_id, role, task_text)\n            base_prompt = self._bot_channel_prompt({"persona": role}) or f"You are {role}."\n            prompt = self._company_role_prompt(role, base_prompt)\n            message = (\n                f"Direct /{role} task from Pinto user:\\n{task_text}\\n\\n"\n                f"Latest requirement ledger for this chat:\\n{self._load_company_requirement_ledger(chat_id)}\\n\\n"\n                f"Latest project path: {latest_project_path or \'(unknown)\'}\\n"\n                f"Latest preview URL: {latest_preview_url or \'(none)\'}\\n\\n"\n                f"Generated project root: {projects_dir}. If this task edits an existing project, continue latest_project_path and do not create a new app unless impossible. "\n                "If asked to run/show/deploy, use Cloudflare-only public preview when possible; do not claim localhost is public. "\n                "Return concise Thai result with evidence, changed files, commands run, and preview URL if available."\n            )\n            reply = await self._run_persona_turn(prompt, message)\n            await self._stream_company_message(workflow_id=workflow_id, agent=role, from_agent=role, to_agent="pinto", task=task_text, text=reply)\n            sent_urls = set()\n            await self._send_preview_urls(chat_id, reply, sent_urls)\n            detected_project_path = self._detect_company_project_path(reply, projects_dir)\n            if detected_project_path:\n                self._save_company_project_memory(chat_id, projectPath=detected_project_path)\n            await self._publish_company_activity({"type":"direct_role_completed","workflowId":workflow_id,"from":role,"to":"pinto","agent":role,"status":"done","location":self._company_role_location(role),"task":task_text,"summary":reply[:240],"message":reply[:2000]})\n            await self.send(chat_id, reply)\n            asyncio.create_task(self._restore_company_agent_idle(workflow_id, role, task_text, 12))\n        except Exception:\n            logger.exception("Pinto direct company role failed chat_id=%s role=%s", chat_id, role_key)\n            try:\n                await self.send(chat_id, f"✖️ direct /{role_key} ล้มเหลว ดู log ฝั่ง Hermes Gateway")\n            except Exception:\n                pass\n\n'
+direct_role_method = '    async def _run_company_role_direct(self, chat_id: str, bot_id: str, bot_config: dict, role_key: str, task_text: str) -> None:\n        # Run one company role directly from a slash command such as /frontend.\n        try:\n            await self.send_typing(chat_id)\n            role = str(role_key or "").strip().lower()\n            allowed = {"pm", "frontend", "designer", "backend", "qa", "techlead"}\n            if role not in allowed:\n                await self.send(chat_id, "⚠️ role command ไม่รองรับ ใช้ /frontend /designer /backend /qa /techlead /pm")\n                return\n            workflow_id = f"direct-{role}-{chat_id}-{uuid.uuid4().hex[:8]}"\n            projects_dir = os.getenv("COMPANY_PROJECTS_DIR", "/company-projects")\n            project_memory = self._load_company_project_memory(chat_id)\n            latest_project_path = str(project_memory.get("projectPath") or "").strip()\n            latest_preview_url = str(project_memory.get("previewUrl") or "").strip()\n            await self.send(chat_id, f"🎯 direct role: {role} เริ่มทำงาน")\n            await self._publish_company_activity({"type":"direct_role_started","workflowId":workflow_id,"from":"pinto","to":role,"agent":role,"status":"working","location":self._company_role_location(role),"task":task_text,"summary":f"/{role} direct task: {task_text[:180]}"})\n            await self._publish_skill_context_loaded(workflow_id, role, task_text, chat_id)\n            base_prompt = self._bot_channel_prompt({"persona": role}) or f"You are {role}."\n            prompt = self._company_role_prompt(role, base_prompt)\n            message = (\n                f"Direct /{role} task from Pinto user:\\n{task_text}\\n\\n"\n                f"Latest requirement ledger for this chat:\\n{self._load_company_requirement_ledger(chat_id)}\\n\\n"\n                f"Latest project path: {latest_project_path or \'(unknown)\'}\\n"\n                f"Latest preview URL: {latest_preview_url or \'(none)\'}\\n\\n"\n                f"Generated project root: {projects_dir}. If this task edits an existing project, continue latest_project_path and do not create a new app unless impossible. "\n                "If asked to run/show/deploy, use Cloudflare-only public preview when possible; do not claim localhost is public. "\n                "Return concise Thai result with evidence, changed files, commands run, and preview URL if available."\n            )\n            reply = await self._run_persona_turn(prompt, message)\n            await self._stream_company_message(workflow_id=workflow_id, agent=role, from_agent=role, to_agent="pinto", task=task_text, text=reply)\n            sent_urls = set()\n            await self._send_preview_urls(chat_id, reply, sent_urls)\n            detected_project_path = self._detect_company_project_path(reply, projects_dir)\n            if detected_project_path:\n                self._save_company_project_memory(chat_id, projectPath=detected_project_path)\n            await self._publish_company_activity({"type":"direct_role_completed","workflowId":workflow_id,"from":role,"to":"pinto","agent":role,"status":"done","location":self._company_role_location(role),"task":task_text,"summary":reply[:240],"message":reply[:2000]})\n            await self.send(chat_id, reply)\n            asyncio.create_task(self._restore_company_agent_idle(workflow_id, role, task_text, 12))\n        except Exception:\n            logger.exception("Pinto direct company role failed chat_id=%s role=%s", chat_id, role_key)\n            try:\n                await self.send(chat_id, f"✖️ direct /{role_key} ล้มเหลว ดู log ฝั่ง Hermes Gateway")\n            except Exception:\n                pass\n\n'
 if 'async def _run_company_role_direct(' not in s:
     workflow_marker = '    async def _run_company_workflow(self, chat_id: str, bot_id: str, bot_config: dict, task_text: str) -> None:\n'
     if workflow_marker not in s:
