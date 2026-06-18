@@ -1311,8 +1311,57 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                     await self._publish_company_activity({"type":"urgent_qa_called","workflowId":workflow_id,"from":techlead_key,"to":"qa","agent":"qa","status":"working","location":"meeting","task":urgent_task,"summary":"QA called to meeting room for urgent test","message":urgent_reply[:1200]})
                     handoff = urgent_reply
                 else:
-                    await self.send(chat_id, "⚠️ PM ยังไม่อนุมัติ ส่ง Tech Lead กลับไปวางแผนรอบแก้ไข")
+                    await self.send(chat_id, "⚠️ PM ยังไม่อนุมัติ ส่ง Tech Lead กลับไปวางแผนรอบแก้ไข แล้วให้ทีมทำเฉพาะจุด")
                     await self._publish_company_activity({"type":"replan_required","workflowId":workflow_id,"from":pm_key,"to":reviewer_key,"agent":reviewer_key,"status":"working","location":"visit:pm","task":task_text,"summary":"Tech Lead must replan and dispatch follow-up work"})
+                    if techlead_key:
+                        replan_task = "Replan PM-rejected delivery into targeted maker tasks. Preserve good work, fix only gaps."
+                        replan_message = (
+                            f"Original request:\\n{task_text}\\n\\nPM rejection / approval review:\\n{pm_approval}\\n\\n"
+                            f"Previous Tech Lead review:\\n{handoff}\\n\\n"
+                            f"Team outputs:\\n{combined_outputs}\\n\\n"
+                            f"You are '{techlead_key}'. Replan targeted rework for these makers only: {', '.join(worker_chain)}. "
+                            "Return concise Thai plus JSON at the end: "
+                            '{"tasks":[{"agent":"frontend","task":"fix ..."}],"notes":"..."}.'
+                        )
+                        await self._publish_skill_context_loaded(workflow_id, techlead_key, replan_task)
+                        replan_reply = await self._run_persona_turn(final_prompt, replan_message)
+                        steps.append({"persona": techlead_key, "output": replan_reply, "task": replan_task})
+                        await self._stream_company_message(workflow_id=workflow_id, agent=techlead_key, from_agent=techlead_key, to_agent="team", task=replan_task, text=replan_reply)
+                        await self._publish_company_activity({"type":"replan_completed","workflowId":workflow_id,"from":techlead_key,"to":"team","agent":techlead_key,"status":"done","location":"meeting","task":replan_task,"summary":replan_reply[:240],"message":replan_reply[:2000]})
+                        rework_dispatch = self._extract_pm_tasks(replan_reply, worker_chain)
+                        if rework_dispatch:
+                            await self.send(chat_id, f"🔁 Tech Lead แตกงานแก้ {len(rework_dispatch)} งาน ส่งทีมทำรอบแก้")
+                        rework_outputs = []
+                        for key, task_for_role in rework_dispatch.items():
+                            prompt = self._company_role_prompt(key, self._bot_channel_prompt({"persona": key}) or f"You are {key}.")
+                            role_todos = self._build_company_role_todos(key, task_for_role)
+                            role_location = self._company_role_location(key)
+                            await self._publish_company_activity({"type":"rework_dispatched","workflowId":workflow_id,"from":techlead_key,"to":key,"agent":key,"status":"working","location":role_location,"task":task_for_role,"summary":f"{techlead_key} rework -> {key}: {task_for_role[:180]}","todos":role_todos,"todoIndex":1,"todoTotal":len(role_todos)})
+                            await self.send(chat_id, f"🔁 {key} ทำ rework ตาม Tech Lead")
+                            rework_message = (
+                                f"Original request:\\n{task_text}\\n\\nTech Lead replan:\\n{replan_reply}\\n\\n"
+                                f"Your rework task:\\n{task_for_role}\\n\\n"
+                                f"Your role is '{key}'. Fix only your assigned gap. Complete checklist:\\n" + "\\n".join(f"- [ ] {todo}" for todo in role_todos) + "\\nHand off evidence back to Tech Lead."
+                            )
+                            await self._publish_skill_context_loaded(workflow_id, key, task_for_role)
+                            rework_reply = await self._run_persona_turn(prompt, rework_message)
+                            rework_outputs.append({"persona": key, "output": rework_reply, "task": task_for_role})
+                            steps.append({"persona": key, "output": rework_reply, "task": task_for_role})
+                            await self._stream_company_message(workflow_id=workflow_id, agent=key, from_agent=key, to_agent=techlead_key, task=task_for_role, text=rework_reply)
+                            await self._send_preview_urls(chat_id, rework_reply, preview_urls_sent)
+                            await self._publish_company_activity({"type":"rework_completed","workflowId":workflow_id,"from":key,"to":techlead_key,"agent":key,"status":"done","location":"visit:techlead","task":task_for_role,"summary":rework_reply[:240],"message":rework_reply[:2000],"todos":role_todos,"todoIndex":len(role_todos),"todoTotal":len(role_todos)})
+                        if rework_outputs:
+                            combined_outputs = "\\n\\n".join(f"[{step.get('persona')}] task={step.get('task','')}\\n{step.get('output','')}" for step in steps)
+                            recheck_message = f"Original request:\\n{task_text}\\n\\nPM rejected previous delivery. Rework outputs:\\n" + "\\n\\n".join(f"[{x['persona']}] {x['output']}" for x in rework_outputs) + f"\\n\\nAll outputs:\\n{combined_outputs}\\n\\nYou are Tech Lead. Re-check rework, then hand back to PM with evidence and remaining risks."
+                            await self._publish_company_activity({"type":"rework_review_started","workflowId":workflow_id,"from":"team","to":techlead_key,"agent":techlead_key,"status":"working","location":"visit:pm","task":task_text,"summary":"Tech Lead reviewing rework before PM re-approval"})
+                            await self._publish_skill_context_loaded(workflow_id, techlead_key, task_text)
+                            handoff = await self._run_persona_turn(final_prompt, recheck_message)
+                            steps.append({"persona": techlead_key, "output": handoff, "task": "review rework"})
+                            await self._stream_company_message(workflow_id=workflow_id, agent=techlead_key, from_agent=techlead_key, to_agent=pm_key, task=task_text, text=handoff)
+                            await self._publish_company_activity({"type":"rework_review_completed","workflowId":workflow_id,"from":techlead_key,"to":pm_key,"agent":techlead_key,"status":"done","location":"visit:pm","task":task_text,"summary":handoff[:240],"message":handoff[:2000]})
+                            pm_approval = await self._run_persona_turn(pm_approval_prompt, f"Original request:\\n{task_text}\\n\\nTech Lead rework review:\\n{handoff}\\n\\nApprove or reject for client delivery. Return the same JSON shape as before.")
+                            pm_decision = self._extract_json_obj(pm_approval) or {}
+                            pm_approved = bool(pm_decision.get("approved"))
             client_text = pm_decision.get("clientMessage") if isinstance(pm_decision, dict) else ""
             if not client_text:
                 client_text = pm_approval if pm_approved else "PM ตรวจแล้วยังไม่อนุมัติ กำลังให้ Tech Lead วางแผนแก้ไขก่อนส่งมอบ"
