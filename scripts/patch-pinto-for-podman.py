@@ -1798,7 +1798,7 @@ company_role_prompt_method = '''    def _company_selected_skill_files(self, role
                 label = "COMPANY AGENTS" if rel.endswith("AGENTS.md") else "SKILL"
                 parts.append(f"\n\n--- {label} {rel} ---\n{text}")
                 used += len(text)
-            parts.append("\n\nUse only the selected injected skills that fit this task. If a needed skill is not loaded, state which skill would be needed instead of pretending. Keep safety rules and role scope.")
+            parts.append("\n\nMANDATORY SKILL-FIRST WORKFLOW:\n1. Before changing files or answering final, read the selected injected AGENTS.md/SKILL.md sections above.\n2. Extract 3-8 concrete rules from the selected skills that apply to this task.\n3. Apply those rules in the work. Do not merely mention the skill name.\n4. In the final answer include a short Skill Receipt with selected skill names and the concrete rules used.\n5. If this is UI/redesign work, use redesign/taste rules as a quality gate: typography, layout, spacing, color/surfaces, interaction states, content realism. If changes only color/gradient, the work is not done.\n6. If a needed skill is not loaded, state which skill would be needed instead of pretending.\nKeep safety rules and role scope.")
             return "".join(parts)
         except Exception:
             return str(base_prompt or f"You are {role_key}.")
