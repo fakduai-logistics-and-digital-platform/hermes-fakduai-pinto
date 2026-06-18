@@ -697,7 +697,23 @@ if 'async def _run_company_workflow(' not in s:
             projects_dir = os.getenv("COMPANY_PROJECTS_DIR", "/company-projects")
             requirement_ledger = self._load_company_requirement_ledger(chat_id)
             followup_keywords = ("ไหน", "cloudflare", "ลิงก์", "link", "url", "ต่อ", "ต่อจาก", "เมื่อกี้", "อันเดิม", "งานเดิม", "preview", "deploy", "run", "รัน")
-            is_followup_request = bool(str(requirement_ledger or "").strip() and str(requirement_ledger).strip() != "(no prior requirements)" and len(str(task_text or "").strip()) <= 160 and any(k in str(task_text or "").lower() for k in followup_keywords))
+            has_prior_project = bool(str(requirement_ledger or "").strip() and str(requirement_ledger).strip() != "(no prior requirements)")
+            lowered_task = str(task_text or "").lower()
+            bug_markers = ("error", "exception", "traceback", "failed", "fail", "blocked request", "not allowed", "allowedhosts", "vite.config", "cors", "404", "500", "503", "build fail", "deploy fail", "preview fail", "เปิดไม่ได้", "พัง", "บั๊ค", "บัก", "แก้บั๊ค", "แก้บัก", "error:")
+            is_bugfix_followup = bool(has_prior_project and any(k in lowered_task for k in bug_markers))
+            if is_bugfix_followup:
+                owner = "frontend"
+                if any(k in lowered_task for k in ("go ", "api", "server", "database", "db", "backend", "port", "handler")):
+                    owner = "backend"
+                if any(k in lowered_task for k in ("test", "qa", "acceptance", "expected", "actual")):
+                    owner = "qa"
+                if any(k in lowered_task for k in ("architecture", "unknown owner", "หลายระบบ", "unclear", "design decision")):
+                    owner = "techlead"
+                await self.send(chat_id, f"🔎 PM เห็นว่าเป็น bug/follow-up ของงานเดิม ไม่เริ่มโปรเจ็คใหม่")
+                await self.send(chat_id, f"🧭 PM triage: ส่งให้ {owner} แก้เฉพาะจุด")
+                await self._run_company_role_direct(chat_id, bot_id, bot_config, owner, f"Bugfix follow-up for existing/latest project. Do not restart from scratch. User report:\n{task_text}")
+                return
+            is_followup_request = bool(has_prior_project and len(str(task_text or "").strip()) <= 160 and any(k in lowered_task for k in followup_keywords))
             if is_followup_request:
                 await self.send(chat_id, "🔎 รับเป็น follow-up ของงานเดิม ไม่เริ่มโปรเจ็คใหม่")
                 task_text = f"Follow-up on the existing/latest company project. User asks: {task_text}. Use the requirement ledger and existing files; do not restart from scratch or create a new app unless impossible."
@@ -1231,7 +1247,23 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             projects_dir = os.getenv("COMPANY_PROJECTS_DIR", "/company-projects")
             requirement_ledger = self._load_company_requirement_ledger(chat_id)
             followup_keywords = ("ไหน", "cloudflare", "ลิงก์", "link", "url", "ต่อ", "ต่อจาก", "เมื่อกี้", "อันเดิม", "งานเดิม", "preview", "deploy", "run", "รัน")
-            is_followup_request = bool(str(requirement_ledger or "").strip() and str(requirement_ledger).strip() != "(no prior requirements)" and len(str(task_text or "").strip()) <= 160 and any(k in str(task_text or "").lower() for k in followup_keywords))
+            has_prior_project = bool(str(requirement_ledger or "").strip() and str(requirement_ledger).strip() != "(no prior requirements)")
+            lowered_task = str(task_text or "").lower()
+            bug_markers = ("error", "exception", "traceback", "failed", "fail", "blocked request", "not allowed", "allowedhosts", "vite.config", "cors", "404", "500", "503", "build fail", "deploy fail", "preview fail", "เปิดไม่ได้", "พัง", "บั๊ค", "บัก", "แก้บั๊ค", "แก้บัก", "error:")
+            is_bugfix_followup = bool(has_prior_project and any(k in lowered_task for k in bug_markers))
+            if is_bugfix_followup:
+                owner = "frontend"
+                if any(k in lowered_task for k in ("go ", "api", "server", "database", "db", "backend", "port", "handler")):
+                    owner = "backend"
+                if any(k in lowered_task for k in ("test", "qa", "acceptance", "expected", "actual")):
+                    owner = "qa"
+                if any(k in lowered_task for k in ("architecture", "unknown owner", "หลายระบบ", "unclear", "design decision")):
+                    owner = "techlead"
+                await self.send(chat_id, f"🔎 PM เห็นว่าเป็น bug/follow-up ของงานเดิม ไม่เริ่มโปรเจ็คใหม่")
+                await self.send(chat_id, f"🧭 PM triage: ส่งให้ {owner} แก้เฉพาะจุด")
+                await self._run_company_role_direct(chat_id, bot_id, bot_config, owner, f"Bugfix follow-up for existing/latest project. Do not restart from scratch. User report:\n{task_text}")
+                return
+            is_followup_request = bool(has_prior_project and len(str(task_text or "").strip()) <= 160 and any(k in lowered_task for k in followup_keywords))
             if is_followup_request:
                 await self.send(chat_id, "🔎 รับเป็น follow-up ของงานเดิม ไม่เริ่มโปรเจ็คใหม่")
                 task_text = f"Follow-up on the existing/latest company project. User asks: {task_text}. Use the requirement ledger and existing files; do not restart from scratch or create a new app unless impossible."
