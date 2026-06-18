@@ -973,6 +973,9 @@ if 'async def _run_company_workflow(' not in s:
             await self._send_preview_urls(chat_id, client_text, preview_urls_sent)
             await self._publish_company_activity({"type":"workflow_completed" if pm_approved else "workflow_blocked_after_single_followup","workflowId":workflow_id,"from":pm_key,"to":"pinto","agent":pm_key,"status":"done" if pm_approved else "blocked","location":"meeting","task":task_text,"summary":client_text[:240],"message":client_text[:2000]})
             await self.send(chat_id, client_text)
+        except asyncio.CancelledError:
+            await self._publish_company_activity({"type":"workflow_cancelled","workflowId":workflow_id if 'workflow_id' in locals() else f"company-{chat_id}","from":"pinto","to":"team","agent":"pm","status":"cancelled","location":"meeting","task":task_text,"summary":"Company workflow cancelled by user"})
+            raise
         except Exception:
             logger.exception("Pinto company workflow failed chat_id=%s bot_id=%s", chat_id, bot_id)
             try:
@@ -1523,6 +1526,9 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             await self._send_preview_urls(chat_id, client_text, preview_urls_sent)
             await self._publish_company_activity({"type":"workflow_completed" if pm_approved else "workflow_blocked_after_single_followup","workflowId":workflow_id,"from":pm_key,"to":"pinto","agent":pm_key,"status":"done" if pm_approved else "blocked","location":"meeting","task":task_text,"summary":client_text[:240],"message":client_text[:2000]})
             await self.send(chat_id, client_text)
+        except asyncio.CancelledError:
+            await self._publish_company_activity({"type":"workflow_cancelled","workflowId":workflow_id if 'workflow_id' in locals() else f"company-{chat_id}","from":"pinto","to":"team","agent":"pm","status":"cancelled","location":"meeting","task":task_text,"summary":"Company workflow cancelled by user"})
+            raise
         except Exception:
             logger.exception("Pinto company workflow failed chat_id=%s bot_id=%s", chat_id, bot_id)
             try:
