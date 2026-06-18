@@ -646,42 +646,16 @@ if 'async def _run_company_workflow(' not in s:
             preview_urls_sent = set()
             workflow_id = f"pinto-{chat_id}-{uuid.uuid4().hex[:8]}"
             projects_dir = os.getenv("COMPANY_PROJECTS_DIR", "/company-projects")
-            project_memory = self._load_company_project_memory(chat_id)
-            latest_project_path = str(project_memory.get("projectPath") or "").strip()
-            latest_preview_url = str(project_memory.get("previewUrl") or "").strip()
             requirement_ledger = self._load_company_requirement_ledger(chat_id)
-            followup_keywords = ("ไหน", "cloudflare", "ลิงก์", "link", "url", "ต่อ", "ต่อจาก", "เมื่อกี้", "อันเดิม", "งานเดิม", "preview", "deploy", "run", "รัน")
-            is_followup_request = bool(str(requirement_ledger or "").strip() and str(requirement_ledger).strip() != "(no prior requirements)" and len(str(task_text or "").strip()) <= 160 and any(k in str(task_text or "").lower() for k in followup_keywords))
-            if is_followup_request:
-                await self.send(chat_id, "🔎 รับเป็น follow-up ของงานเดิม ไม่เริ่มโปรเจ็คใหม่")
-                task_text = f"Follow-up on the existing/latest company project. User asks: {task_text}. Use the requirement ledger and existing files; do not restart from scratch or create a new app unless impossible. Latest project path: {latest_project_path or '(unknown)'}. Latest preview URL: {latest_preview_url or '(none)'}"
-            if (not is_followup_request) and os.getenv("CLEAR_COMPANY_PROJECTS_ON_WORKFLOW_START", "true").strip().lower() in ("1", "true", "yes", "on"):
-                import shutil
-                from pathlib import Path
-                root = Path(projects_dir)
-                root.mkdir(parents=True, exist_ok=True)
-                for child in root.iterdir():
-                    if child.name in (".gitkeep", ".DS_Store"):
-                        continue
-                    if child.is_dir() and not child.is_symlink():
-                        shutil.rmtree(child)
-                    else:
-                        child.unlink(missing_ok=True)
             self._append_company_requirement(chat_id, task_text)
             requirement_ledger = self._load_company_requirement_ledger(chat_id)
             project_instructions = (
-                (f"This is a follow-up. Continue the existing project at {latest_project_path}. Do not create a new project directory. " if is_followup_request and latest_project_path else "") +
-                f"Generated project files must be written under {projects_dir}/<project-name>. " +
-                "Never write generated project files under /root, /tmp, or the container home directory. " +
-                ("Use the existing project slug from latest project memory. " if is_followup_request and latest_project_path else "Use a clear project slug such as chaos-delivery-simulator. ") +
-                "Before starting a preview server, stop/kill any old preview process for the previous generated project and reuse the preferred preview port if possible. " +
-                "For backend/server/preview serving code, use Go or Node.js only; do not create Python servers unless an existing project already requires Python. " +
-                "For public preview, use Cloudflare only (workers.dev, pages.dev, trycloudflare.com). Do not use localhost.run."
+                f"Generated project files must be written under {projects_dir}/<project-name>. "
+                "Never write generated project files under /root. Use a clear project slug such as proton-landing."
             )
-            pm_key = "pm" if "pm" in chain else chain[0]
-            techlead_key = "techlead" if "techlead" in chain else None
-            worker_chain = [key for key in chain if key not in (pm_key, techlead_key)]
-            meeting_agents = [pm_key] + ([techlead_key] if techlead_key else []) + worker_chain
+            pm_key = chain[0]
+            worker_chain = [key for key in chain[1:] if key]
+            meeting_agents = [pm_key] + worker_chain
             for member in meeting_agents:
                 await self._publish_company_activity({"type":"team_meeting_started","workflowId":workflow_id,"from":"pinto","to":member,"agent":member,"status":"working" if member == pm_key else "idle","location":"meeting","task":task_text,"summary":"PM kickoff meeting: requirement intake and task split"})
 
@@ -691,44 +665,24 @@ if 'async def _run_company_workflow(' not in s:
             pm_message = (
                 f"User request for proton company workflow:\n{task_text}\n\n"
                 f"Recent requirement ledger for this chat:\n{requirement_ledger}\n\n"
-                f"You are '{pm_key}'. Treat the user as a non-technical client. Convert vague intent into concrete goals, assumptions, acceptance criteria, constraints, and a brief for Tech Lead. Do not directly assign detailed implementation tasks to individual makers unless Tech Lead is unavailable. Available makers after Tech Lead: {', '.join(worker_chain)}.\n"
-                "If the user asks to run, preview, host, deploy, open, or show the product, route that request directly to frontend and/or backend dev tasks. Do not make the user run it themselves unless credentials or environment are missing. Use Cloudflare/Wrangler only for public preview/hosting. Do not use localhost.run or SSH reverse tunnels. If Cloudflare auth/config is unavailable, run locally if possible and report that public Cloudflare preview is still unavailable rather than claiming a hosted URL. "
-                "Return concise Thai planning plus a JSON object at the end in this exact shape: "
-                '{"tasks":[{"agent":"techlead","task":"technical plan and dispatch ..."}],"notes":"..."}. '
-                "Prefer assigning the first technical planning task to techlead when available."
+                f"You are '{pm_key}'. Treat the user as a non-technical client. Convert vague intent into concrete goals, assumptions, acceptance criteria, constraints, and role-specific tasks for these agents: {', '.join(worker_chain)}.\n"
+                "If the user asks to run, preview, host, deploy, open, or show the product, route that request directly to frontend and/or backend dev tasks. Do not make the user run it themselves unless credentials or environment are missing. Prefer Cloudflare/Wrangler when authenticated; otherwise use localhost.run via ssh -R 80:localhost:3000 nokey@localhost.run if SSH and a local preview server are available. "
+                "Return concise Thai planning plus a JSON object at the end in this exact shape:\n"
+                '{"tasks":[{"agent":"designer","task":"..."}],"notes":"..."}\n'
+                "Only include available agents. Each task must be different and fit that role."
             )
-            await self._publish_skill_context_loaded(workflow_id, pm_key, task_text)
             pm_reply = await self._run_persona_turn(pm_prompt, pm_message)
-            await self.send(chat_id, "✅ PM สรุป requirement แล้ว กำลังคุยกับ Tech Lead ก่อนให้ทีมลงมือทำ")
+            await self.send(chat_id, "✅ PM แบ่งงานแล้ว กำลังให้ทีมลงมือทำ")
             steps.append({"persona": pm_key, "output": pm_reply, "task": "plan and dispatch"})
             await self._stream_company_message(workflow_id=workflow_id, agent=pm_key, from_agent=pm_key, to_agent="team", task=task_text, text=pm_reply)
             await self._send_preview_urls(chat_id, pm_reply, preview_urls_sent)
-            await self._publish_company_activity({"type":"role_completed","workflowId":workflow_id,"from":pm_key,"to":"techlead" if techlead_key else "team","agent":pm_key,"status":"done","task":task_text,"summary":pm_reply[:240],"message":pm_reply[:2000]})
-            await self.send(chat_id, f"✅ {pm_key} เสร็จแล้ว ส่ง Tech Lead วางแผนก่อน")
+            await self._publish_company_activity({"type":"role_completed","workflowId":workflow_id,"from":pm_key,"to":"team","agent":pm_key,"status":"done","task":task_text,"summary":pm_reply[:240],"message":pm_reply[:2000]})
+            await self.send(chat_id, f"✅ {pm_key} เสร็จแล้ว ส่งงานต่อให้ทีม")
             asyncio.create_task(self._restore_company_agent_idle(workflow_id, pm_key, task_text, 12))
             for member in meeting_agents:
-                await self._publish_company_activity({"type":"team_meeting_ended","workflowId":workflow_id,"from":pm_key,"to":member,"agent":member,"status":"idle" if member == pm_key else "idle","location":"meeting" if member == pm_key else "desk","task":task_text,"summary":"PM stays in meeting room; agents return to desks"})
+                await self._publish_company_activity({"type":"team_meeting_ended","workflowId":workflow_id,"from":pm_key,"to":member,"agent":member,"status":"done" if member == pm_key else "idle","location":"desk","task":task_text,"summary":"PM kickoff meeting ended; agents return to desks"})
 
-            dispatch = {}
-            if techlead_key:
-                tl_prompt = self._company_role_prompt(techlead_key, self._bot_channel_prompt({"persona": techlead_key}) or f"You are {techlead_key}.")
-                tl_task = (self._extract_pm_tasks(pm_reply, [techlead_key]).get(techlead_key) or "Turn PM requirements into architecture, role-specific tasks, integration order, and Cloudflare-only preview plan.")
-                await self._publish_company_activity({"type":"task_dispatched","workflowId":workflow_id,"from":pm_key,"to":techlead_key,"agent":techlead_key,"status":"working","location":"visit:pm","task":tl_task,"summary":f"{pm_key} -> {techlead_key}: technical planning and dispatch"})
-                await self.send(chat_id, f"▶️ {techlead_key} เริ่มวาง technical plan")
-                tl_message = (
-                    f"Original user request:\n{task_text}\n\nPM intake/requirements:\n{pm_reply}\n\n"
-                    f"You are '{techlead_key}'. Create a technical plan and assign role-specific tasks to these makers only: {', '.join(worker_chain)}. Include architecture, integration order, risks, acceptance checks, and Cloudflare-only preview/deploy plan. Return concise Thai plus JSON at the end: "
-                    '{"tasks":[{"agent":"frontend","task":"..."}],"notes":"..."}.'
-                )
-                await self._publish_skill_context_loaded(workflow_id, techlead_key, tl_task)
-                techlead_plan = await self._run_persona_turn(tl_prompt, tl_message)
-                steps.append({"persona": techlead_key, "output": techlead_plan, "task": tl_task})
-                await self._stream_company_message(workflow_id=workflow_id, agent=techlead_key, from_agent=techlead_key, to_agent="team", task=tl_task, text=techlead_plan)
-                await self._send_preview_urls(chat_id, techlead_plan, preview_urls_sent)
-                await self._publish_company_activity({"type":"role_completed","workflowId":workflow_id,"from":techlead_key,"to":"team","agent":techlead_key,"status":"done","task":tl_task,"summary":techlead_plan[:240],"message":techlead_plan[:2000]})
-                dispatch = self._extract_pm_tasks(techlead_plan, worker_chain)
-            else:
-                dispatch = self._extract_pm_tasks(pm_reply, worker_chain)
+            dispatch = self._extract_pm_tasks(pm_reply, worker_chain)
             worker_outputs = []
             for idx, key in enumerate(worker_chain, start=1):
                 task_for_role = dispatch.get(key) or f"Build on PM plan for your {key} role."
@@ -748,7 +702,6 @@ if 'async def _run_company_workflow(' not in s:
                     f"Recent peer outputs you may coordinate with:\n{peer_context}\n\n"
                     f"Your role is '{key}'. Do only your assigned role-specific work. Complete this todo checklist step by step before handoff:\n" + "\n".join(f"- [ ] {todo}" for todo in role_todos) + "\nTalk to/hand off to the next relevant teammate when useful. Do not redo PM planning."
                 )
-                await self._publish_skill_context_loaded(workflow_id, key, task_for_role)
                 reply = await self._run_persona_turn(prompt, user_message)
                 worker_outputs.append({"persona": key, "output": reply, "task": task_for_role})
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
@@ -756,11 +709,10 @@ if 'async def _run_company_workflow(' not in s:
                 await self._stream_company_message(workflow_id=workflow_id, agent=key, from_agent=key, to_agent=next_to, task=task_for_role, text=reply)
                 await self._send_preview_urls(chat_id, reply, preview_urls_sent)
                 await self._publish_company_activity({"type":"todo_completed","workflowId":workflow_id,"from":key,"to":key,"agent":key,"status":"done","task":task_for_role,"summary":f"{key} completed {len(role_todos)}/{len(role_todos)} todos","todos":role_todos,"todoIndex":len(role_todos),"todoTotal":len(role_todos),"message":reply[:1200]})
-                handoff_location = f"visit:{next_to}" if next_to in worker_chain else "visit:techlead"
-                await self._publish_company_activity({"type":"peer_handoff","workflowId":workflow_id,"from":key,"to":next_to,"agent":key,"status":"done","location":handoff_location,"task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
+                await self._publish_company_activity({"type":"peer_handoff","workflowId":workflow_id,"from":key,"to":next_to,"agent":key,"status":"done","location":"talk","task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
+                await self._publish_company_activity({"type":"submitted_to_pm","workflowId":workflow_id,"from":key,"to":pm_key,"agent":key,"status":"done","location":"talk","task":task_for_role,"summary":f"{key} submitted work to PM and is waiting for feedback","message":reply[:1200]})
                 await self.send(chat_id, f"✅ {key} เสร็จแล้ว ส่งต่อให้ {next_to}")
 
-            await self._publish_company_activity({"type":"pm_waiting","workflowId":workflow_id,"from":pm_key,"to":"team","agent":pm_key,"status":"idle","location":"meeting","task":task_text,"summary":"PM waits in meeting room while team works"})
             await self.send(chat_id, "✅ ทีมทำงานรอบแรกครบแล้ว กำลังให้ PM review")
             team_outputs = "\n\n".join(f"[{step.get('persona')}] task={step.get('task','')}\n{step.get('output','')}" for step in steps)
             await self._publish_company_activity({"type":"pm_review_started","workflowId":workflow_id,"from":"team","to":pm_key,"agent":pm_key,"status":"working","task":task_text,"summary":f"{pm_key} reviewing team outputs for follow-up"})
@@ -770,10 +722,8 @@ if 'async def _run_company_workflow(' not in s:
                 f"Latest requirement ledger for this chat:\n{self._load_company_requirement_ledger(chat_id)}\n\n"
                 f"Team outputs so far:\n{team_outputs}\n\n"
                 f"You are '{pm_key}'. Merge teammate outputs with the latest requirement ledger. If new/changed requirements conflict with completed work, preserve useful completed work and assign targeted follow-up tasks to the right available agents: {', '.join(worker_chain)}. If QA or any teammate found bugs, blockers, missing work, or dependencies, assign follow-up tasks too.\n"
-                "Hard limit: PM may create only ONE follow-up round in this workflow. Do not create a second follow-up loop. Prefer the smallest targeted task set that can unblock delivery. "
                 "Return brief Thai review plus JSON at the end: {\"tasks\":[{\"agent\":\"backend\",\"task\":\"fix/rework ...\"}],\"notes\":\"...\"}. Return empty tasks if no follow-up needed."
             )
-            await self._publish_skill_context_loaded(workflow_id, pm_key, task_text)
             pm_review = await self._run_persona_turn(pm_prompt, pm_review_message)
             steps.append({"persona": pm_key, "output": pm_review, "task": "review and follow-up dispatch"})
             await self._stream_company_message(workflow_id=workflow_id, agent=pm_key, from_agent=pm_key, to_agent="team", task=task_text, text=pm_review)
@@ -799,122 +749,27 @@ if 'async def _run_company_workflow(' not in s:
                     f"Your follow-up task from PM:\n{task_for_role}\n\n"
                     f"Your role is '{key}'. Address the issue directly. Complete this todo checklist step by step before handoff:\n" + "\n".join(f"- [ ] {todo}" for todo in role_todos) + "\nIf this came from QA, respond with fix/decision and handoff back to QA/PM."
                 )
-                await self._publish_skill_context_loaded(workflow_id, key, task_for_role)
                 reply = await self._run_persona_turn(prompt, follow_message)
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
                 await self._stream_company_message(workflow_id=workflow_id, agent=key, from_agent=key, to_agent=pm_key, task=task_for_role, text=reply)
                 await self._send_preview_urls(chat_id, reply, preview_urls_sent)
                 await self._publish_company_activity({"type":"todo_completed","workflowId":workflow_id,"from":key,"to":key,"agent":key,"status":"done","task":task_for_role,"summary":f"{key} completed {len(role_todos)}/{len(role_todos)} follow-up todos","todos":role_todos,"todoIndex":len(role_todos),"todoTotal":len(role_todos),"message":reply[:1200]})
-                await self._publish_company_activity({"type":"followup_completed","workflowId":workflow_id,"from":key,"to":pm_key,"agent":key,"status":"done","location":"visit:pm","task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
+                await self._publish_company_activity({"type":"followup_completed","workflowId":workflow_id,"from":key,"to":pm_key,"agent":key,"status":"done","location":"talk","task":task_for_role,"summary":reply[:240],"message":reply[:2000]})
                 await self.send(chat_id, f"✅ {key} แก้ follow-up เสร็จแล้ว ส่งกลับ PM")
                 asyncio.create_task(self._restore_company_agent_idle(workflow_id, key, task_for_role, 12))
 
-            reviewer_key = techlead_key if techlead_key else worker_chain[-1] if worker_chain else pm_key
+            reviewer_key = "techlead" if "techlead" in worker_chain else worker_chain[-1] if worker_chain else pm_key
             final_prompt = self._company_role_prompt(reviewer_key, self._bot_channel_prompt({"persona": reviewer_key}) or f"You are {reviewer_key}.")
             combined_outputs = "\n\n".join(f"[{step.get('persona')}] task={step.get('task','')}\n{step.get('output','')}" for step in steps)
-            await self._publish_company_activity({"type":"review_started","workflowId":workflow_id,"from":"team","to":reviewer_key,"agent":reviewer_key,"status":"working","location":"visit:pm","task":task_text,"summary":f"{reviewer_key} started final review with PM"})
+            await self._publish_company_activity({"type":"review_started","workflowId":workflow_id,"from":"team","to":reviewer_key,"agent":reviewer_key,"status":"working","task":task_text,"summary":f"{reviewer_key} started final review"})
             await self.send(chat_id, f"▶️ {reviewer_key} เริ่ม final review")
-            preview_hint = "real preview URL found" if preview_urls_sent else "NO real preview URL found"
-            final_message = f"Original user request:\n{task_text}\n\nTeam outputs:\n{combined_outputs}\n\nPreview status: {preview_hint}. Create the final answer to the Pinto user. Be practical, consolidated, and avoid repeating internal chatter. If the user asked to run/show/preview/deploy, do not claim it is running, deployed, hosted, or ready to open unless team outputs contain a real Cloudflare preview URL (workers.dev, pages.dev, trycloudflare.com). localhost.run does not count. If Preview status says NO real preview URL found, explicitly say Cloudflare preview is not available yet and list the exact next step needed to run/host it on Cloudflare."
-            await self.send(chat_id, "✅ Tech Lead กำลังตรวจงานรวมแล้วส่งให้ PM ตรวจ")
-            await self._publish_skill_context_loaded(workflow_id, reviewer_key, task_text)
+            final_message = f"Original user request:\n{task_text}\n\nTeam outputs:\n{combined_outputs}\n\nCreate the final answer to the Pinto user. Be practical, consolidated, and avoid repeating internal chatter."
+            await self.send(chat_id, "✅ Tech Lead กำลังสรุป final")
             handoff = await self._run_persona_turn(final_prompt, final_message)
-            await self._stream_company_message(workflow_id=workflow_id, agent=reviewer_key, from_agent=reviewer_key, to_agent=pm_key, task=task_text, text=handoff)
+            await self._stream_company_message(workflow_id=workflow_id, agent=reviewer_key, from_agent=reviewer_key, to_agent="pinto", task=task_text, text=handoff)
             await self._send_preview_urls(chat_id, handoff, preview_urls_sent)
-            await self._publish_company_activity({"type":"review_completed","workflowId":workflow_id,"from":reviewer_key,"to":pm_key,"agent":reviewer_key,"status":"done","location":"visit:pm","task":task_text,"summary":handoff[:240],"message":handoff[:2000]})
-
-            pm_approval_prompt = self._company_role_prompt(pm_key, self._bot_channel_prompt({"persona": pm_key}) or f"You are {pm_key}.")
-            pm_approval_message = (
-                f"Original user request:\n{task_text}\n\nTech Lead review:\n{handoff}\n\n"
-                "You are PM. Inspect the Tech Lead delivery as client advocate. Decide if it is acceptable. "
-                'If acceptable, return JSON {"approved":true,"urgent":false,"tasks":[],"clientMessage":"..."}. '
-                'If not acceptable, return JSON {"approved":false,"urgent":false,"tasks":[{"agent":"techlead","task":"replan ..."}],"clientMessage":"..."}. '
-                "If urgent and the issue is narrow, set urgent true and ask Tech Lead to fix in meeting room, then QA to test; add dev helpers only if workload is large. "
-                "Hard limit: approve or request exactly one targeted rework round only. After that round, do not keep the workflow open; report remaining blocker to client if still not acceptable. "
-                "Never claim Cloudflare preview exists unless a workers.dev, pages.dev, or trycloudflare.com URL is present."
-            )
-            await self._publish_company_activity({"type":"pm_approval_started","workflowId":workflow_id,"from":reviewer_key,"to":pm_key,"agent":pm_key,"status":"working","location":"meeting","task":task_text,"summary":"PM reviewing Tech Lead delivery before client handoff"})
-            await self._publish_skill_context_loaded(workflow_id, pm_key, task_text)
-            pm_approval = await self._run_persona_turn(pm_approval_prompt, pm_approval_message)
-            await self._stream_company_message(workflow_id=workflow_id, agent=pm_key, from_agent=pm_key, to_agent=reviewer_key, task=task_text, text=pm_approval)
-            pm_decision = self._extract_json_obj(pm_approval) or {}
-            pm_approved = bool(pm_decision.get("approved"))
-            urgent_fix = bool(pm_decision.get("urgent"))
-            if not pm_approved:
-                await self._publish_company_activity({"type":"pm_rejected_delivery","workflowId":workflow_id,"from":pm_key,"to":reviewer_key,"agent":pm_key,"status":"working","location":"meeting","task":task_text,"summary":"PM rejected delivery; Tech Lead must replan/fix before client handoff","message":pm_approval[:2000]})
-                if urgent_fix and techlead_key:
-                    await self.send(chat_id, "⚠️ PM ไม่อนุมัติ งานเร่งด่วน: Tech Lead แก้ในห้องประชุม แล้วเรียก QA test")
-                    urgent_task = (pm_decision.get("tasks") or [{}])[0].get("task") if isinstance(pm_decision.get("tasks"), list) else None
-                    urgent_task = urgent_task or "Urgent PM fix: correct the narrow issue, call QA to test in meeting room, and involve dev helpers only if workload is too large."
-                    await self._publish_company_activity({"type":"urgent_fix_started","workflowId":workflow_id,"from":pm_key,"to":techlead_key,"agent":techlead_key,"status":"working","location":"meeting","task":urgent_task,"summary":"Tech Lead urgent fix in meeting room"})
-                    await self._publish_skill_context_loaded(workflow_id, techlead_key, urgent_task)
-                    urgent_reply = await self._run_persona_turn(final_prompt, f"PM rejected delivery and marked urgent. Fix or coordinate narrow correction now. Call QA to test in meeting room. Involve frontend/backend only if workload is large.\n\nPM review:\n{pm_approval}\n\nOriginal request:\n{task_text}")
-                    await self._stream_company_message(workflow_id=workflow_id, agent=techlead_key, from_agent=techlead_key, to_agent="qa", task=urgent_task, text=urgent_reply)
-                    await self._publish_company_activity({"type":"urgent_qa_called","workflowId":workflow_id,"from":techlead_key,"to":"qa","agent":"qa","status":"working","location":"meeting","task":urgent_task,"summary":"QA called to meeting room for urgent test","message":urgent_reply[:1200]})
-                    handoff = urgent_reply
-                else:
-                    await self.send(chat_id, "⚠️ PM ยังไม่อนุมัติ ส่ง Tech Lead กลับไปวางแผนรอบแก้ไข แล้วให้ทีมทำเฉพาะจุด")
-                    await self._publish_company_activity({"type":"replan_required","workflowId":workflow_id,"from":pm_key,"to":reviewer_key,"agent":reviewer_key,"status":"working","location":"visit:pm","task":task_text,"summary":"Tech Lead must replan and dispatch follow-up work"})
-                    if techlead_key:
-                        replan_task = "Replan PM-rejected delivery into targeted maker tasks. Preserve good work, fix only gaps."
-                        replan_message = (
-                            f"Original request:\n{task_text}\n\nPM rejection / approval review:\n{pm_approval}\n\n"
-                            f"Previous Tech Lead review:\n{handoff}\n\n"
-                            f"Team outputs:\n{combined_outputs}\n\n"
-                            f"You are '{techlead_key}'. Replan targeted rework for these makers only: {', '.join(worker_chain)}. "
-                            "Return concise Thai plus JSON at the end: "
-                            '{"tasks":[{"agent":"frontend","task":"fix ..."}],"notes":"..."}.'
-                        )
-                        await self._publish_skill_context_loaded(workflow_id, techlead_key, replan_task)
-                        replan_reply = await self._run_persona_turn(final_prompt, replan_message)
-                        steps.append({"persona": techlead_key, "output": replan_reply, "task": replan_task})
-                        await self._stream_company_message(workflow_id=workflow_id, agent=techlead_key, from_agent=techlead_key, to_agent="team", task=replan_task, text=replan_reply)
-                        await self._publish_company_activity({"type":"replan_completed","workflowId":workflow_id,"from":techlead_key,"to":"team","agent":techlead_key,"status":"done","location":"meeting","task":replan_task,"summary":replan_reply[:240],"message":replan_reply[:2000]})
-                        rework_dispatch = self._extract_pm_tasks(replan_reply, worker_chain)
-                        if rework_dispatch:
-                            await self.send(chat_id, f"🔁 Tech Lead แตกงานแก้ {len(rework_dispatch)} งาน ส่งทีมทำรอบแก้")
-                        rework_outputs = []
-                        for key, task_for_role in rework_dispatch.items():
-                            prompt = self._company_role_prompt(key, self._bot_channel_prompt({"persona": key}) or f"You are {key}.")
-                            role_todos = self._build_company_role_todos(key, task_for_role)
-                            role_location = self._company_role_location(key)
-                            await self._publish_company_activity({"type":"rework_dispatched","workflowId":workflow_id,"from":techlead_key,"to":key,"agent":key,"status":"working","location":role_location,"task":task_for_role,"summary":f"{techlead_key} rework -> {key}: {task_for_role[:180]}","todos":role_todos,"todoIndex":1,"todoTotal":len(role_todos)})
-                            await self.send(chat_id, f"🔁 {key} ทำ rework ตาม Tech Lead")
-                            rework_message = (
-                                f"Original request:\n{task_text}\n\nTech Lead replan:\n{replan_reply}\n\n"
-                                f"Your rework task:\n{task_for_role}\n\n"
-                                f"Your role is '{key}'. Fix only your assigned gap. Complete checklist:\n" + "\n".join(f"- [ ] {todo}" for todo in role_todos) + "\nHand off evidence back to Tech Lead."
-                            )
-                            await self._publish_skill_context_loaded(workflow_id, key, task_for_role)
-                            rework_reply = await self._run_persona_turn(prompt, rework_message)
-                            rework_outputs.append({"persona": key, "output": rework_reply, "task": task_for_role})
-                            steps.append({"persona": key, "output": rework_reply, "task": task_for_role})
-                            await self._stream_company_message(workflow_id=workflow_id, agent=key, from_agent=key, to_agent=techlead_key, task=task_for_role, text=rework_reply)
-                            await self._send_preview_urls(chat_id, rework_reply, preview_urls_sent)
-                            await self._publish_company_activity({"type":"rework_completed","workflowId":workflow_id,"from":key,"to":techlead_key,"agent":key,"status":"done","location":"visit:techlead","task":task_for_role,"summary":rework_reply[:240],"message":rework_reply[:2000],"todos":role_todos,"todoIndex":len(role_todos),"todoTotal":len(role_todos)})
-                        if rework_outputs:
-                            combined_outputs = "\n\n".join(f"[{step.get('persona')}] task={step.get('task','')}\n{step.get('output','')}" for step in steps)
-                            recheck_message = f"Original request:\n{task_text}\n\nPM rejected previous delivery. Rework outputs:\n" + "\n\n".join(f"[{x['persona']}] {x['output']}" for x in rework_outputs) + f"\n\nAll outputs:\n{combined_outputs}\n\nYou are Tech Lead. Re-check rework, then hand back to PM with evidence and remaining risks."
-                            await self._publish_company_activity({"type":"rework_review_started","workflowId":workflow_id,"from":"team","to":techlead_key,"agent":techlead_key,"status":"working","location":"visit:pm","task":task_text,"summary":"Tech Lead reviewing rework before PM re-approval"})
-                            await self._publish_skill_context_loaded(workflow_id, techlead_key, task_text)
-                            handoff = await self._run_persona_turn(final_prompt, recheck_message)
-                            steps.append({"persona": techlead_key, "output": handoff, "task": "review rework"})
-                            await self._stream_company_message(workflow_id=workflow_id, agent=techlead_key, from_agent=techlead_key, to_agent=pm_key, task=task_text, text=handoff)
-                            await self._publish_company_activity({"type":"rework_review_completed","workflowId":workflow_id,"from":techlead_key,"to":pm_key,"agent":techlead_key,"status":"done","location":"visit:pm","task":task_text,"summary":handoff[:240],"message":handoff[:2000]})
-                            pm_approval = await self._run_persona_turn(pm_approval_prompt, f"Original request:\n{task_text}\n\nTech Lead rework review:\n{handoff}\n\nApprove or reject for client delivery. This was the only allowed rework/follow-up round. If still not acceptable, do not request another loop; return a clientMessage that states the remaining blocker and exact next step. Return the same JSON shape as before.")
-                            pm_decision = self._extract_json_obj(pm_approval) or {}
-                            pm_approved = bool(pm_decision.get("approved"))
-            detected_project_path = self._detect_company_project_path("\n\n".join(str(step.get("output", "")) for step in steps) + "\n" + str(handoff), projects_dir)
-            if detected_project_path:
-                self._save_company_project_memory(chat_id, projectPath=detected_project_path)
-            client_text = pm_decision.get("clientMessage") if isinstance(pm_decision, dict) else ""
-            if not client_text:
-                client_text = pm_approval if pm_approved else "PM ตรวจแล้วยังไม่อนุมัติหลัง follow-up รอบเดียว จึงหยุด workflow เพื่อกันค้าง และรายงาน blocker/next step ให้ลูกค้าทราบ"
-            if not pm_approved and "follow-up รอบเดียว" not in client_text:
-                client_text = client_text + "\n\nหมายเหตุ: ระบบใช้ follow-up/rework ครบ 1 รอบแล้ว จึงหยุดงานไว้ตรงนี้เพื่อกันค้าง ไม่วนแก้ซ้ำอัตโนมัติ"
-            await self._send_preview_urls(chat_id, client_text, preview_urls_sent)
-            await self._publish_company_activity({"type":"workflow_completed" if pm_approved else "workflow_blocked_after_single_followup","workflowId":workflow_id,"from":pm_key,"to":"pinto","agent":pm_key,"status":"done" if pm_approved else "blocked","location":"meeting","task":task_text,"summary":client_text[:240],"message":client_text[:2000]})
-            await self.send(chat_id, client_text)
+            await self._publish_company_activity({"type":"workflow_completed","workflowId":workflow_id,"from":reviewer_key,"to":"pinto","agent":reviewer_key,"status":"done","task":task_text,"summary":handoff[:240],"message":handoff[:2000]})
+            await self.send(chat_id, handoff)
         except Exception:
             logger.exception("Pinto company workflow failed chat_id=%s bot_id=%s", chat_id, bot_id)
             try:
@@ -938,8 +793,8 @@ if 'async def _run_company_workflow(' not in s:
         base = str(task_text or "assigned task").strip()[:220]
         presets = {
             "designer": ["Extract UX goals and user journey", "Define layout, visual direction, and responsive states", "Hand off concrete UI guidance to frontend"],
-            "frontend": ["Review design/requirements", "Implement UI and interactions", "Stop old preview if needed, run current app locally, deploy/share Cloudflare preview only, and report Cloudflare URL if available"],
-            "backend": ["Review runtime/hosting requirements", "Implement Go or Node.js server/static serving or Cloudflare deploy packaging", "Stop old preview if needed, validate preview command and Cloudflare URL/path"],
+            "frontend": ["Review design/requirements", "Implement UI and interactions", "Run local/hosted preview and report URL if available"],
+            "backend": ["Review runtime/hosting requirements", "Implement server/static serving or deploy packaging", "Validate preview command and report URL/path"],
             "qa": ["Derive acceptance checks", "Test happy paths, edge cases, responsive behavior, and preview URL", "Report pass/fail with evidence and follow-up items"],
             "techlead": ["Review outputs against requirements", "Check risks, gaps, and integration", "Produce final user-facing summary with path/link/evidence"],
             "pm": ["Convert client request into requirements", "Split role-specific tasks", "Merge outputs and new requirements into follow-up plan"],
@@ -953,58 +808,6 @@ if 'async def _run_company_workflow(' not in s:
         root = Path(os.getenv("COMPANY_REQUIREMENTS_DIR", "/root/.hermes/company-requirements"))
         safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(chat_id or "unknown"))[:120]
         return root / f"{safe}.md"
-
-    def _company_project_memory_path(self, chat_id: str):
-        import os
-        from pathlib import Path
-        root = Path(os.getenv("COMPANY_PROJECT_MEMORY_DIR", "/root/.hermes/company-project-memory"))
-        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(chat_id or "unknown"))[:120]
-        return root / f"{safe}.json"
-
-    def _load_company_project_memory(self, chat_id: str) -> dict:
-        try:
-            import json
-            path = self._company_project_memory_path(chat_id)
-            if not path.exists():
-                return {}
-            data = json.loads(path.read_text(encoding="utf-8", errors="ignore") or "{}")
-            return data if isinstance(data, dict) else {}
-        except Exception:
-            return {}
-
-    def _save_company_project_memory(self, chat_id: str, **updates) -> None:
-        try:
-            import json, time
-            path = self._company_project_memory_path(chat_id)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            data = self._load_company_project_memory(chat_id)
-            for key, value in updates.items():
-                if value:
-                    data[key] = value
-            data["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            logger.debug("Failed to save company project memory", exc_info=True)
-
-    def _detect_company_project_path(self, text: str, projects_dir: str = "/company-projects") -> str:
-        try:
-            import re
-            raw = str(text or "")
-            escaped = re.escape(str(projects_dir).rstrip("/"))
-            match = re.search(escaped + r"/[A-Za-z0-9_.-]+", raw)
-            if match:
-                return match.group(0)
-            from pathlib import Path
-            root = Path(projects_dir)
-            if not root.exists():
-                return ""
-            candidates = [p for p in root.iterdir() if p.is_dir() and not p.is_symlink() and p.name not in (".git", "node_modules", "archive")]
-            if not candidates:
-                return ""
-            latest = max(candidates, key=lambda p: p.stat().st_mtime)
-            return str(latest)
-        except Exception:
-            return ""
 
     def _load_company_requirement_ledger(self, chat_id: str) -> str:
         try:
@@ -1032,13 +835,12 @@ if 'async def _run_company_workflow(' not in s:
             if not text:
                 return
             import re
-            urls = re.findall(r"https://[^\s<>)\]\"']+(?:workers\.dev|pages\.dev|trycloudflare\.com)[^\s<>)\]\"']*", str(text))
+            urls = re.findall(r"https://[^\s<>)\]\"']+(?:workers\.dev|pages\.dev|trycloudflare\.com|localhost\.run)[^\s<>)\]\"']*", str(text))
             for url in urls:
                 clean = url.strip().rstrip(".,;:!?)]}").rstrip("'").rstrip('"')
                 if not clean or clean in sent_urls:
                     continue
                 sent_urls.add(clean)
-                self._save_company_project_memory(chat_id, previewUrl=clean)
                 await self.send(chat_id, f"🌐 Preview พร้อมแล้ว: {clean}")
         except Exception:
             logger.debug("Failed to send preview URL", exc_info=True)
@@ -1060,17 +862,6 @@ if 'async def _run_company_workflow(' not in s:
             })
         except Exception:
             logger.debug("Failed to restore company agent idle", exc_info=True)
-
-    def _extract_json_obj(self, text: str) -> dict:
-        try:
-            import json, re
-            raw = str(text or "")
-            match = re.search(r"\{[\s\S]*\}\s*$", raw)
-            if not match:
-                match = re.search(r"\{[\s\S]*\}", raw)
-            return json.loads(match.group(0)) if match else {}
-        except Exception:
-            return {}
 
     def _extract_pm_tasks(self, text: str, allowed_agents: list) -> dict:
         # Extract PM JSON dispatch tasks from model output.
