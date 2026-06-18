@@ -774,6 +774,9 @@ if 'async def _run_company_workflow(' not in s:
                 "qa": ["skills/karpathy-guidelines/SKILL.md", "skills/mattpocock/deprecated/qa/SKILL.md", "skills/mattpocock/in-progress/review/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/mattpocock/engineering/tdd/SKILL.md", "skills/mattpocock/engineering/triage/SKILL.md", "skills/9arm/skills/engineering/debug-mantra/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md"],
                 "techlead": ["skills/karpathy-guidelines/SKILL.md", "skills/stop-slop/SKILL.md", "skills/mattpocock/engineering/codebase-design/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md", "skills/9arm/skills/engineering/post-mortem/SKILL.md", "skills/9arm/skills/productivity/management-talk/SKILL.md"],
             }
+            if role in {"designer", "frontend"}:
+                taste_files = sorted(str(p.relative_to(root)) for p in (root / "skills" / "taste-skill").rglob("*.md"))
+                skill_map[role] = list(dict.fromkeys(taste_files + skill_map.get(role, [])))
             candidates = [f"templates/workspaces/{role}/AGENTS.md", "templates/workspaces/default/AGENTS.md"] + skill_map.get(role, ["skills/karpathy-guidelines/SKILL.md"])
             return [rel for rel in candidates if (root / rel).exists()]
         except Exception:
@@ -1540,7 +1543,10 @@ company_role_prompt_method = '''    def _company_role_prompt(self, role_key: str
                 "qa": ["skills/karpathy-guidelines/SKILL.md", "skills/mattpocock/deprecated/qa/SKILL.md", "skills/mattpocock/in-progress/review/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/mattpocock/engineering/tdd/SKILL.md", "skills/mattpocock/engineering/triage/SKILL.md", "skills/9arm/skills/engineering/debug-mantra/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md"],
                 "techlead": ["skills/karpathy-guidelines/SKILL.md", "skills/stop-slop/SKILL.md", "skills/mattpocock/engineering/codebase-design/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md", "skills/9arm/skills/engineering/post-mortem/SKILL.md", "skills/9arm/skills/productivity/management-talk/SKILL.md"],
             }
-            budget = int(os.getenv("COMPANY_SKILL_PROMPT_BUDGET", "52000"))
+            if role in {"designer", "frontend"}:
+                taste_files = sorted(str(p.relative_to(root)) for p in (root / "skills" / "taste-skill").rglob("*.md"))
+                skill_map[role] = list(dict.fromkeys(taste_files + skill_map.get(role, [])))
+            budget = int(os.getenv("COMPANY_SKILL_PROMPT_BUDGET", "90000"))
             used = sum(len(x) for x in parts)
             for rel in skill_map.get(role, ["skills/karpathy-guidelines/SKILL.md"]):
                 path = root / rel
