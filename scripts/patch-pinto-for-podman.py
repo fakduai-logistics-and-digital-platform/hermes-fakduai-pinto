@@ -676,6 +676,10 @@ if 'async def _run_company_workflow(' not in s:
         # Run PM-led company orchestration.
         try:
             await self.send_typing(chat_id)
+            direct_match = re.match(r"^\s*/(pm|frontend|designer|backend|qa|techlead)\s+(.+)$", str(task_text or ""), re.IGNORECASE | re.DOTALL)
+            if direct_match:
+                await self._run_company_role_direct(chat_id, bot_id, bot_config, direct_match.group(1).lower(), direct_match.group(2).strip())
+                return
             chain = bot_config.get("companyWorkflow")
             if not isinstance(chain, list) or not chain:
                 extra = getattr(self, "_extra_config", None) or {}
@@ -1210,6 +1214,10 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
         # Run PM-led company orchestration.
         try:
             await self.send_typing(chat_id)
+            direct_match = re.match(r"^\s*/(pm|frontend|designer|backend|qa|techlead)\s+(.+)$", str(task_text or ""), re.IGNORECASE | re.DOTALL)
+            if direct_match:
+                await self._run_company_role_direct(chat_id, bot_id, bot_config, direct_match.group(1).lower(), direct_match.group(2).strip())
+                return
             chain = bot_config.get("companyWorkflow")
             if not isinstance(chain, list) or not chain:
                 extra = getattr(self, "_extra_config", None) or {}
