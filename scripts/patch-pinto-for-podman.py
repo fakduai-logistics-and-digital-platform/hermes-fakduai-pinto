@@ -1153,18 +1153,18 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 f"Recent requirement ledger for this chat:\\n{requirement_ledger}\\n\\n"
                 f"You are '{pm_key}'. Treat the user as a non-technical client. Convert vague intent into concrete goals, assumptions, acceptance criteria, constraints, and a brief for Tech Lead. Do not directly assign detailed implementation tasks to individual makers unless Tech Lead is unavailable. Available makers after Tech Lead: {', '.join(worker_chain)}.\n"
                 "If the user asks to run, preview, host, deploy, open, or show the product, route that request directly to frontend and/or backend dev tasks. Do not make the user run it themselves unless credentials or environment are missing. Use Cloudflare/Wrangler only for public preview/hosting. Do not use localhost.run or SSH reverse tunnels. If Cloudflare auth/config is unavailable, run locally if possible and report that public Cloudflare preview is still unavailable rather than claiming a hosted URL. "
-                "Return concise Thai planning plus a JSON object at the end in this exact shape:\\n"
-                '{"tasks":[{"agent":"techlead","task":"technical plan and dispatch ..."}],"notes":"..."}\n'
+                "Return concise Thai planning plus a JSON object at the end in this exact shape: "
+                '{"tasks":[{"agent":"techlead","task":"technical plan and dispatch ..."}],"notes":"..."}. '
                 "Prefer assigning the first technical planning task to techlead when available."
             )
             await self._publish_skill_context_loaded(workflow_id, pm_key, task_text)
             pm_reply = await self._run_persona_turn(pm_prompt, pm_message)
-            await self.send(chat_id, "✅ PM แบ่งงานแล้ว กำลังให้ทีมลงมือทำ")
+            await self.send(chat_id, "✅ PM สรุป requirement แล้ว กำลังคุยกับ Tech Lead ก่อนให้ทีมลงมือทำ")
             steps.append({"persona": pm_key, "output": pm_reply, "task": "plan and dispatch"})
             await self._stream_company_message(workflow_id=workflow_id, agent=pm_key, from_agent=pm_key, to_agent="team", task=task_text, text=pm_reply)
             await self._send_preview_urls(chat_id, pm_reply, preview_urls_sent)
-            await self._publish_company_activity({"type":"role_completed","workflowId":workflow_id,"from":pm_key,"to":"team","agent":pm_key,"status":"done","task":task_text,"summary":pm_reply[:240],"message":pm_reply[:2000]})
-            await self.send(chat_id, f"✅ {pm_key} เสร็จแล้ว ส่งงานต่อให้ทีม")
+            await self._publish_company_activity({"type":"role_completed","workflowId":workflow_id,"from":pm_key,"to":"techlead" if techlead_key else "team","agent":pm_key,"status":"done","task":task_text,"summary":pm_reply[:240],"message":pm_reply[:2000]})
+            await self.send(chat_id, f"✅ {pm_key} เสร็จแล้ว ส่ง Tech Lead วางแผนก่อน")
             asyncio.create_task(self._restore_company_agent_idle(workflow_id, pm_key, task_text, 12))
             for member in meeting_agents:
                 await self._publish_company_activity({"type":"team_meeting_ended","workflowId":workflow_id,"from":pm_key,"to":member,"agent":member,"status":"idle" if member == pm_key else "idle","location":"meeting" if member == pm_key else "desk","task":task_text,"summary":"PM stays in meeting room; agents return to desks"})
