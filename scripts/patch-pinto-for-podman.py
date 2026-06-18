@@ -1736,10 +1736,9 @@ company_role_prompt_method = '''    def _company_selected_skill_files(self, role
                     selected.append(rel)
                     reasons.append({"path": rel, "reason": reason})
             # Small always-on role foundations.
+            add("skills/karpathy-guidelines/SKILL.md", "mandatory before-start guidance for every company agent")
             if role in {"frontend", "designer"}:
                 add("skills/taste-skill/skills/taste-skill/SKILL.md", "UI role base taste guidance")
-            if role in {"frontend", "backend", "techlead", "qa"}:
-                add("skills/karpathy-guidelines/SKILL.md", "engineering base guidance")
             if role == "pm":
                 add("skills/9arm/skills/productivity/management-talk/SKILL.md", "PM communication")
                 add("skills/9arm/skills/engineering/scrutinize/SKILL.md", "PM review/scrutiny")
