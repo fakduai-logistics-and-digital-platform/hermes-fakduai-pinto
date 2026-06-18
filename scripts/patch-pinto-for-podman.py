@@ -1176,7 +1176,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 await self._publish_company_activity({"type":"task_dispatched","workflowId":workflow_id,"from":pm_key,"to":techlead_key,"agent":techlead_key,"status":"working","location":"visit:pm","task":tl_task,"summary":f"{pm_key} -> {techlead_key}: technical planning and dispatch"})
                 await self.send(chat_id, f"▶️ {techlead_key} เริ่มวาง technical plan")
                 tl_message = (
-                    f"Original user request:\n{task_text}\n\nPM intake/requirements:\n{pm_reply}\n\n"
+                    f"Original user request:\\n{task_text}\\n\\nPM intake/requirements:\\n{pm_reply}\\n\\n"
                     f"You are '{techlead_key}'. Create a technical plan and assign role-specific tasks to these makers only: {', '.join(worker_chain)}. Include architecture, integration order, risks, acceptance checks, and Cloudflare-only preview/deploy plan. Return concise Thai plus JSON at the end: "
                     '{"tasks":[{"agent":"frontend","task":"..."}],"notes":"..."}.'
                 )
@@ -1306,7 +1306,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                     urgent_task = urgent_task or "Urgent PM fix: correct the narrow issue, call QA to test in meeting room, and involve dev helpers only if workload is too large."
                     await self._publish_company_activity({"type":"urgent_fix_started","workflowId":workflow_id,"from":pm_key,"to":techlead_key,"agent":techlead_key,"status":"working","location":"meeting","task":urgent_task,"summary":"Tech Lead urgent fix in meeting room"})
                     await self._publish_skill_context_loaded(workflow_id, techlead_key, urgent_task)
-                    urgent_reply = await self._run_persona_turn(final_prompt, f"PM rejected delivery and marked urgent. Fix or coordinate narrow correction now. Call QA to test in meeting room. Involve frontend/backend only if workload is large.\n\nPM review:\n{pm_approval}\n\nOriginal request:\n{task_text}")
+                    urgent_reply = await self._run_persona_turn(final_prompt, f"PM rejected delivery and marked urgent. Fix or coordinate narrow correction now. Call QA to test in meeting room. Involve frontend/backend only if workload is large.\\n\\nPM review:\\n{pm_approval}\\n\\nOriginal request:\\n{task_text}")
                     await self._stream_company_message(workflow_id=workflow_id, agent=techlead_key, from_agent=techlead_key, to_agent="qa", task=urgent_task, text=urgent_reply)
                     await self._publish_company_activity({"type":"urgent_qa_called","workflowId":workflow_id,"from":techlead_key,"to":"qa","agent":"qa","status":"working","location":"meeting","task":urgent_task,"summary":"QA called to meeting room for urgent test","message":urgent_reply[:1200]})
                     handoff = urgent_reply
