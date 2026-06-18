@@ -1052,11 +1052,7 @@ if 'async def _run_company_workflow(' not in s:
             import time
             path = self._company_requirement_path(chat_id)
             path.parent.mkdir(parents=True, exist_ok=True)
-            entry = f"
-
-## {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
-{text.strip()[:4000]}
-"
+            entry = f"\\n\\n## {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\\n{text.strip()[:4000]}\\n"
             with path.open("a", encoding="utf-8") as fh:
                 fh.write(entry)
         except Exception:
