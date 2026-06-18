@@ -700,6 +700,7 @@ if 'async def _run_company_workflow(' not in s:
                 "pm": [
                     "skills/stop-slop/SKILL.md",
                     "skills/9arm/skills/productivity/management-talk/SKILL.md",
+                    "skills/9arm/skills/engineering/scrutinize/SKILL.md",
                     "skills/9arm/skills/productivity/qwenchance/SKILL.md",
                     "skills/karpathy-guidelines/SKILL.md",
                 ],
@@ -766,7 +767,7 @@ if 'async def _run_company_workflow(' not in s:
             root = Path(os.getenv("COMPANY_SKILLS_DIR", "/root/.hermes/company-skills"))
             role = str(role_key or "default").strip().lower() or "default"
             skill_map = {
-                "pm": ["skills/stop-slop/SKILL.md", "skills/9arm/skills/productivity/management-talk/SKILL.md", "skills/9arm/skills/productivity/qwenchance/SKILL.md", "skills/karpathy-guidelines/SKILL.md"],
+                "pm": ["skills/stop-slop/SKILL.md", "skills/9arm/skills/productivity/management-talk/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md", "skills/9arm/skills/productivity/qwenchance/SKILL.md", "skills/karpathy-guidelines/SKILL.md"],
                 "designer": ["skills/taste-skill/skills/taste-skill/SKILL.md", "skills/karpathy-guidelines/SKILL.md"],
                 "frontend": ["skills/taste-skill/skills/taste-skill/SKILL.md", "skills/karpathy-guidelines/SKILL.md", "skills/cloudflare/SKILL.md", "skills/cloudflare/skills/wrangler/SKILL.md"],
                 "backend": ["skills/karpathy-guidelines/SKILL.md", "skills/mattpocock/engineering/tdd/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/mattpocock/engineering/domain-modeling/SKILL.md", "skills/9arm/skills/engineering/debug-mantra/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md", "skills/cloudflare/SKILL.md", "skills/cloudflare/skills/workers-best-practices/SKILL.md"],
@@ -1528,7 +1529,7 @@ company_role_prompt_method = '''    def _company_role_prompt(self, role_key: str
                 if path.exists():
                     parts.append(f"\\n\\n--- COMPANY AGENTS ({path}) ---\\n{path.read_text(encoding='utf-8', errors='ignore')[:16000]}")
             skill_map = {
-                "pm": ["skills/stop-slop/SKILL.md", "skills/9arm/skills/productivity/management-talk/SKILL.md", "skills/9arm/skills/productivity/qwenchance/SKILL.md", "skills/karpathy-guidelines/SKILL.md"],
+                "pm": ["skills/stop-slop/SKILL.md", "skills/9arm/skills/productivity/management-talk/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md", "skills/9arm/skills/productivity/qwenchance/SKILL.md", "skills/karpathy-guidelines/SKILL.md"],
                 "designer": ["skills/taste-skill/skills/taste-skill/SKILL.md", "skills/karpathy-guidelines/SKILL.md"],
                 "frontend": ["skills/taste-skill/skills/taste-skill/SKILL.md", "skills/karpathy-guidelines/SKILL.md", "skills/cloudflare/skills/cloudflare/SKILL.md", "skills/cloudflare/skills/wrangler/SKILL.md", "skills/cloudflare/skills/workers-best-practices/SKILL.md"],
                 "backend": ["skills/karpathy-guidelines/SKILL.md", "skills/mattpocock/engineering/tdd/SKILL.md", "skills/mattpocock/engineering/diagnosing-bugs/SKILL.md", "skills/mattpocock/engineering/domain-modeling/SKILL.md", "skills/9arm/skills/engineering/debug-mantra/SKILL.md", "skills/9arm/skills/engineering/scrutinize/SKILL.md", "skills/cloudflare/skills/cloudflare/SKILL.md", "skills/cloudflare/skills/wrangler/SKILL.md", "skills/cloudflare/skills/workers-best-practices/SKILL.md"],
