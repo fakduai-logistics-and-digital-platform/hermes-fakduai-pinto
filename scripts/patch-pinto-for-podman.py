@@ -992,7 +992,17 @@ if 'async def _run_company_workflow(' not in s:
             raw = str(text or "")
             escaped = re.escape(str(projects_dir).rstrip("/"))
             match = re.search(escaped + r"/[A-Za-z0-9_.-]+", raw)
-            return match.group(0) if match else ""
+            if match:
+                return match.group(0)
+            from pathlib import Path
+            root = Path(projects_dir)
+            if not root.exists():
+                return ""
+            candidates = [p for p in root.iterdir() if p.is_dir() and not p.is_symlink() and p.name not in (".git", "node_modules", "archive")]
+            if not candidates:
+                return ""
+            latest = max(candidates, key=lambda p: p.stat().st_mtime)
+            return str(latest)
         except Exception:
             return ""
 
