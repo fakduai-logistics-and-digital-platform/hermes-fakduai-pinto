@@ -1123,7 +1123,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 f"User request for proton company workflow:\\n{task_text}\\n\\n"
                 f"Recent requirement ledger for this chat:\\n{requirement_ledger}\\n\\n"
                 f"You are '{pm_key}'. Treat the user as a non-technical client. Convert vague intent into concrete goals, assumptions, acceptance criteria, constraints, and role-specific tasks for these agents: {', '.join(worker_chain)}.\n"
-                "If the user asks to run, preview, host, deploy, open, or show the product, route that request directly to frontend and/or backend dev tasks. Do not make the user run it themselves unless credentials or environment are missing. Prefer Cloudflare/Wrangler when authenticated; otherwise use localhost.run via ssh -R 80:localhost:3000 nokey@localhost.run if SSH and a local preview server are available. "
+                "If the user asks to run, preview, host, deploy, open, or show the product, route that request directly to frontend and/or backend dev tasks. Do not make the user run it themselves unless credentials or environment are missing. Use Cloudflare/Wrangler only for public preview/hosting. Do not use localhost.run or SSH reverse tunnels. If Cloudflare auth/config is unavailable, run locally if possible and report that public Cloudflare preview is still unavailable rather than claiming a hosted URL. "
                 "Return concise Thai planning plus a JSON object at the end in this exact shape:\\n"
                 '{"tasks":[{"agent":"designer","task":"..."}],"notes":"..."}\n'
                 "Only include available agents. Each task must be different and fit that role."
@@ -1222,7 +1222,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             await self._publish_company_activity({"type":"review_started","workflowId":workflow_id,"from":"team","to":reviewer_key,"agent":reviewer_key,"status":"working","location":"visit:pm","task":task_text,"summary":f"{reviewer_key} started final review with PM"})
             await self.send(chat_id, f"▶️ {reviewer_key} เริ่ม final review")
             preview_hint = "real preview URL found" if preview_urls_sent else "NO real preview URL found"
-            final_message = f"Original user request:\\n{task_text}\\n\\nTeam outputs:\\n{combined_outputs}\\n\\nPreview status: {preview_hint}. Create the final answer to the Pinto user. Be practical, consolidated, and avoid repeating internal chatter. If the user asked to run/show/preview/deploy, do not claim it is running, deployed, hosted, or ready to open unless team outputs contain a real preview URL (workers.dev, pages.dev, trycloudflare.com, localhost.run). If Preview status says NO real preview URL found, explicitly say preview is not available yet and list the exact next step needed to run/host it."
+            final_message = f"Original user request:\\n{task_text}\\n\\nTeam outputs:\\n{combined_outputs}\\n\\nPreview status: {preview_hint}. Create the final answer to the Pinto user. Be practical, consolidated, and avoid repeating internal chatter. If the user asked to run/show/preview/deploy, do not claim it is running, deployed, hosted, or ready to open unless team outputs contain a real Cloudflare preview URL (workers.dev, pages.dev, trycloudflare.com). localhost.run does not count. If Preview status says NO real preview URL found, explicitly say Cloudflare preview is not available yet and list the exact next step needed to run/host it on Cloudflare."
             await self.send(chat_id, "✅ Tech Lead กำลังสรุป final")
             handoff = await self._run_persona_turn(final_prompt, final_message)
             await self._stream_company_message(workflow_id=workflow_id, agent=reviewer_key, from_agent=reviewer_key, to_agent="pinto", task=task_text, text=handoff)
@@ -1252,7 +1252,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
         base = str(task_text or "assigned task").strip()[:220]
         presets = {
             "designer": ["Extract UX goals and user journey", "Define layout, visual direction, and responsive states", "Hand off concrete UI guidance to frontend"],
-            "frontend": ["Review design/requirements", "Implement UI and interactions", "Run local/hosted preview and report URL if available"],
+            "frontend": ["Review design/requirements", "Implement UI and interactions", "Run app locally if possible, deploy/share Cloudflare preview only, and report Cloudflare URL if available"],
             "backend": ["Review runtime/hosting requirements", "Implement server/static serving or deploy packaging", "Validate preview command and report URL/path"],
             "qa": ["Derive acceptance checks", "Test happy paths, edge cases, responsive behavior, and preview URL", "Report pass/fail with evidence and follow-up items"],
             "techlead": ["Review outputs against requirements", "Check risks, gaps, and integration", "Produce final user-facing summary with path/link/evidence"],
@@ -1294,7 +1294,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
             if not text:
                 return
             import re
-            urls = re.findall(r"https://[^\s<>)\]\\\"']+(?:workers\.dev|pages\.dev|trycloudflare\.com|localhost\.run)[^\s<>)\]\\\"']*", str(text))
+            urls = re.findall(r"https://[^\s<>)\]\\\"']+(?:workers\.dev|pages\.dev|trycloudflare\.com)[^\s<>)\]\\\"']*", str(text))
             for url in urls:
                 clean = url.strip().rstrip(".,;:!?)]}").rstrip("'").rstrip('"')
                 if not clean or clean in sent_urls:
