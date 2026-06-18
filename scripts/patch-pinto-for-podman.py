@@ -1231,6 +1231,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 f"Latest requirement ledger for this chat:\\n{self._load_company_requirement_ledger(chat_id)}\\n\\n"
                 f"Team outputs so far:\\n{team_outputs}\\n\\n"
                 f"You are '{pm_key}'. Merge teammate outputs with the latest requirement ledger. If new/changed requirements conflict with completed work, preserve useful completed work and assign targeted follow-up tasks to the right available agents: {', '.join(worker_chain)}. If QA or any teammate found bugs, blockers, missing work, or dependencies, assign follow-up tasks too.\\n"
+                "Hard limit: PM may create only ONE follow-up round in this workflow. Do not create a second follow-up loop. Prefer the smallest targeted task set that can unblock delivery. "
                 "Return brief Thai review plus JSON at the end: {\"tasks\":[{\"agent\":\"backend\",\"task\":\"fix/rework ...\"}],\"notes\":\"...\"}. Return empty tasks if no follow-up needed."
             )
             await self._publish_skill_context_loaded(workflow_id, pm_key, task_text)
@@ -1290,6 +1291,7 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 'If acceptable, return JSON {"approved":true,"urgent":false,"tasks":[],"clientMessage":"..."}. '
                 'If not acceptable, return JSON {"approved":false,"urgent":false,"tasks":[{"agent":"techlead","task":"replan ..."}],"clientMessage":"..."}. '
                 "If urgent and the issue is narrow, set urgent true and ask Tech Lead to fix in meeting room, then QA to test; add dev helpers only if workload is large. "
+                "Hard limit: approve or request exactly one targeted rework round only. After that round, do not keep the workflow open; report remaining blocker to client if still not acceptable. "
                 "Never claim Cloudflare preview exists unless a workers.dev, pages.dev, or trycloudflare.com URL is present."
             )
             await self._publish_company_activity({"type":"pm_approval_started","workflowId":workflow_id,"from":reviewer_key,"to":pm_key,"agent":pm_key,"status":"working","location":"meeting","task":task_text,"summary":"PM reviewing Tech Lead delivery before client handoff"})
@@ -1360,14 +1362,16 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                             steps.append({"persona": techlead_key, "output": handoff, "task": "review rework"})
                             await self._stream_company_message(workflow_id=workflow_id, agent=techlead_key, from_agent=techlead_key, to_agent=pm_key, task=task_text, text=handoff)
                             await self._publish_company_activity({"type":"rework_review_completed","workflowId":workflow_id,"from":techlead_key,"to":pm_key,"agent":techlead_key,"status":"done","location":"visit:pm","task":task_text,"summary":handoff[:240],"message":handoff[:2000]})
-                            pm_approval = await self._run_persona_turn(pm_approval_prompt, f"Original request:\\n{task_text}\\n\\nTech Lead rework review:\\n{handoff}\\n\\nApprove or reject for client delivery. Return the same JSON shape as before.")
+                            pm_approval = await self._run_persona_turn(pm_approval_prompt, f"Original request:\\n{task_text}\\n\\nTech Lead rework review:\\n{handoff}\\n\\nApprove or reject for client delivery. This was the only allowed rework/follow-up round. If still not acceptable, do not request another loop; return a clientMessage that states the remaining blocker and exact next step. Return the same JSON shape as before.")
                             pm_decision = self._extract_json_obj(pm_approval) or {}
                             pm_approved = bool(pm_decision.get("approved"))
             client_text = pm_decision.get("clientMessage") if isinstance(pm_decision, dict) else ""
             if not client_text:
-                client_text = pm_approval if pm_approved else "PM ตรวจแล้วยังไม่อนุมัติ กำลังให้ Tech Lead วางแผนแก้ไขก่อนส่งมอบ"
+                client_text = pm_approval if pm_approved else "PM ตรวจแล้วยังไม่อนุมัติหลัง follow-up รอบเดียว จึงหยุด workflow เพื่อกันค้าง และรายงาน blocker/next step ให้ลูกค้าทราบ"
+            if not pm_approved and "follow-up รอบเดียว" not in client_text:
+                client_text = client_text + "\\n\\nหมายเหตุ: ระบบใช้ follow-up/rework ครบ 1 รอบแล้ว จึงหยุดงานไว้ตรงนี้เพื่อกันค้าง ไม่วนแก้ซ้ำอัตโนมัติ"
             await self._send_preview_urls(chat_id, client_text, preview_urls_sent)
-            await self._publish_company_activity({"type":"workflow_completed" if pm_approved else "workflow_needs_rework","workflowId":workflow_id,"from":pm_key,"to":"pinto","agent":pm_key,"status":"done" if pm_approved else "working","location":"meeting","task":task_text,"summary":client_text[:240],"message":client_text[:2000]})
+            await self._publish_company_activity({"type":"workflow_completed" if pm_approved else "workflow_blocked_after_single_followup","workflowId":workflow_id,"from":pm_key,"to":"pinto","agent":pm_key,"status":"done" if pm_approved else "blocked","location":"meeting","task":task_text,"summary":client_text[:240],"message":client_text[:2000]})
             await self.send(chat_id, client_text)
         except Exception:
             logger.exception("Pinto company workflow failed chat_id=%s bot_id=%s", chat_id, bot_id)
