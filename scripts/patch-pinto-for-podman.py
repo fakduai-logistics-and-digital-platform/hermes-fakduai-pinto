@@ -811,6 +811,9 @@ if 'async def _run_company_workflow(' not in s:
                 )
                 await self._publish_skill_context_loaded(workflow_id, key, task_for_role, chat_id)
                 reply = await self._run_persona_turn(prompt, user_message)
+                consult_reply = await self._maybe_company_consult(chat_id, workflow_id, key, task_for_role, reply)
+                if consult_reply:
+                    reply = reply + "\n\n[Consultation]\n" + consult_reply
                 worker_outputs.append({"persona": key, "output": reply, "task": task_for_role})
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
                 next_to = worker_chain[idx] if idx < len(worker_chain) else "techlead"
@@ -862,6 +865,9 @@ if 'async def _run_company_workflow(' not in s:
                 )
                 await self._publish_skill_context_loaded(workflow_id, key, task_for_role, chat_id)
                 reply = await self._run_persona_turn(prompt, follow_message)
+                consult_reply = await self._maybe_company_consult(chat_id, workflow_id, key, task_for_role, reply)
+                if consult_reply:
+                    reply = reply + "\n\n[Consultation]\n" + consult_reply
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
                 await self._stream_company_message(workflow_id=workflow_id, agent=key, from_agent=key, to_agent=pm_key, task=task_for_role, text=reply)
                 await self._send_preview_urls(chat_id, reply, preview_urls_sent)
@@ -1364,6 +1370,9 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 )
                 await self._publish_skill_context_loaded(workflow_id, key, task_for_role, chat_id)
                 reply = await self._run_persona_turn(prompt, user_message)
+                consult_reply = await self._maybe_company_consult(chat_id, workflow_id, key, task_for_role, reply)
+                if consult_reply:
+                    reply = reply + "\n\n[Consultation]\n" + consult_reply
                 worker_outputs.append({"persona": key, "output": reply, "task": task_for_role})
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
                 next_to = worker_chain[idx] if idx < len(worker_chain) else "techlead"
@@ -1415,6 +1424,9 @@ pm_dispatch_method = '''    async def _run_company_workflow(self, chat_id: str, 
                 )
                 await self._publish_skill_context_loaded(workflow_id, key, task_for_role, chat_id)
                 reply = await self._run_persona_turn(prompt, follow_message)
+                consult_reply = await self._maybe_company_consult(chat_id, workflow_id, key, task_for_role, reply)
+                if consult_reply:
+                    reply = reply + "\n\n[Consultation]\n" + consult_reply
                 steps.append({"persona": key, "output": reply, "task": task_for_role})
                 await self._stream_company_message(workflow_id=workflow_id, agent=key, from_agent=key, to_agent=pm_key, task=task_for_role, text=reply)
                 await self._send_preview_urls(chat_id, reply, preview_urls_sent)
@@ -1963,6 +1975,45 @@ elif 'primary_cfg = extra.get("primaryBot")' in s:
     print('Pinto adapter primary bot config patch already applied')
 else:
     raise SystemExit('Expected Pinto _bot_config primary block not found')
+
+# Ensure real inter-agent consultation helper exists.
+consult_method = r'''
+    async def _maybe_company_consult(self, chat_id: str, workflow_id: str, role_key: str, task_text: str, role_reply: str) -> str:
+        """Run a real one-turn consultation when an agent reports blockers or uncertainty."""
+        try:
+            text = f"{task_text}\\n\\n{role_reply}".lower()
+            blocker_words = ("blocked", "blocker", "unclear", "ไม่ชัด", "ติด", "ปัญหา", "error", "failed", "fail", "can't", "cannot", "ไม่สามารถ", "requirement")
+            if not any(w in text for w in blocker_words):
+                return ""
+            role = str(role_key or "").lower()
+            advisor = ""
+            reason = ""
+            if role in {"frontend", "backend"}:
+                advisor = "techlead"; reason = "technical blocker/implementation decision"
+            elif role in {"designer", "qa"} or "requirement" in text or "ไม่ชัด" in text or "unclear" in text:
+                advisor = "pm"; reason = "UI/UX, QA, or requirement clarification"
+            if not advisor or advisor == role:
+                return ""
+            await self.send(chat_id, f"💬 {role} ขอปรึกษา {advisor}: {reason}")
+            await self._publish_company_activity({"type":"consultation_started","workflowId":workflow_id,"from":role,"to":advisor,"agent":advisor,"status":"working","location":"meeting","task":task_text,"summary":f"{role} consults {advisor}: {reason}","message":str(role_reply)[:1200]})
+            await self._publish_skill_context_loaded(workflow_id, advisor, task_text, chat_id)
+            prompt = self._company_role_prompt(advisor, self._bot_channel_prompt({"persona": advisor}) or f"You are {advisor}.", task_text)
+            user_message = f"A teammate needs real consultation, not a status animation.\\n\\nRequester role: {role}\\nAdvisor role: {advisor}\\nReason: {reason}\\n\\nOriginal task:\\n{task_text}\\n\\nRequester output / blocker:\\n{role_reply}\\n\\nGive concrete guidance, decision, clarification, or escalation. Be specific enough that the requester can continue work. Thai concise."
+            advice = await self._run_persona_turn(prompt, user_message)
+            await self._stream_company_message(workflow_id=workflow_id, agent=advisor, from_agent=advisor, to_agent=role, task=task_text, text=advice)
+            await self._publish_company_activity({"type":"consultation_completed","workflowId":workflow_id,"from":advisor,"to":role,"agent":advisor,"status":"done","location":"meeting","task":task_text,"summary":advice[:240],"message":advice[:2000]})
+            await self.send(chat_id, f"✅ {advisor} ให้คำปรึกษา {role} แล้ว")
+            return advice
+        except Exception:
+            logger.debug("Company consultation failed", exc_info=True)
+            return ""
+
+'''
+if 'def _maybe_company_consult' not in s:
+    marker = '    async def _run_persona_turn(self, system_prompt: str, user_message: str) -> str:\n'
+    if marker in s:
+        s = s.replace(marker, consult_method + marker, 1)
+        patched = True
 
 p.write_text(s, encoding='utf-8')
 print('Patched Pinto adapter for Hermes 0.16 compatibility' if patched else 'Pinto adapter already patched')
